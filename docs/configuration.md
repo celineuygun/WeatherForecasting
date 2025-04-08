@@ -1,6 +1,6 @@
 ### WRF and WPS Configuration Files
 
-**`namelist.wps`**: This file contains the WPS configuration settings, including the domains, time window, and other simulation parameters. Make sure to update the `start_date`, `end_date`, and domain configurations according to your desired simulation setup. `geog_data_path` should point to the location where your WPS_GEOG data is stored.
+**`namelist.wps`**: This file contains the WPS configuration settings, including the domains, time window, and other simulation parameters. Make sure to update the `start_date`, `end_date`, and domain configurations according to your desired simulation setup. `geog_data_path` should point to the location where your `WPS_GEOG` data is stored.
 
 ```fortran
 &share
@@ -40,7 +40,7 @@
 /
 ```
 
-**`namelist.input`**: This file contains the input configuration for the WRF model. It includes settings for the simulation period, number of domains, and other parameters. The max_dom, start_date, and end_date parameters should match the ones in namelist.wps.
+**`namelist.input`**: This file contains the input configuration for the WRF model. It includes settings for the simulation period, number of domains, and other parameters. The `max_dom`, `start_date`, and `end_date` parameters should match the ones in `namelist.wps`.
 
 ```fortran
 &time_control
@@ -141,7 +141,7 @@
 
 ### Setting Up Zsh for WRF and WPS
 
-If you're using **Zsh** as your default shell, make sure to update your **`.zshrc`** file to include the following paths for proper execution of WRF and WPS. Replace the placeholder values (like the ones for WRF_DIR, WPS_DIR, or the Conda path) with the actual locations where WRF, WPS, and Conda are installed on your system.
+If you're using **Zsh** as your default shell, make sure to update your **`.zshrc`** file to include the following paths for proper execution of WRF and WPS. Replace the placeholder values (like the ones for `WRF_DIR`, `WPS_DIR`, or the Conda path) with the actual locations where WRF, WPS, and Conda are installed on your system.
 
 ```bash
 export PATH="/opt/homebrew/bin:$PATH"
@@ -196,4 +196,4 @@ Remember to source your .zshrc file to apply the changes:
 
 ```bash
 source ~/.zshrc
-``
+```

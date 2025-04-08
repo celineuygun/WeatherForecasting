@@ -81,7 +81,7 @@ tar -xzf geog_high_res_mandatory.tar.gz
 
 Make sure `namelist.wps` includes:
 ```fortran
-geog_data_path = "./WPS_GEOG"
+geog_data_path = "/path/to/WPS_GEOG"
 ```
 
 ### Link GFS Variable Table
