@@ -236,6 +236,8 @@ def move_wrf_outputs(wrf_path: str, wrfout_path: str):
         glob.glob(os.path.join(wrf_path, "wrfrst_d0*_*"))
     )
 
+    moved_wrfout_files = []
+
     for file_path in all_outputs:
         file_name = os.path.basename(file_path)
         try:
@@ -261,7 +263,20 @@ def move_wrf_outputs(wrf_path: str, wrfout_path: str):
         os.makedirs(target_dir, exist_ok=True)
 
         subprocess.run(["mv", file_name, target_dir], cwd=wrf_path)
-        logging.info(f"Moved {file_name} → {target_dir}")
+        moved_wrfout_files.append(file_name)
+
+    logging.info(f"Moved {len(moved_wrfout_files)} WRF output files to {wrfout_path}")
+
+    log_files = glob.glob(os.path.join(wrf_path, "rsl.*"))
+
+    if log_files:
+        log_dir = os.path.join(wrfout_path, forecast_time.strftime("%Y-%m-%d"), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+
+        for log_file in log_files:
+            subprocess.run(["mv", log_file, log_dir], cwd=wrf_path)
+
+        logging.info(f"Moved {len(log_files)} log files to {log_dir}")
 
 def run_wrf(wps_path: str, wrf_path: str, wrfout_path: str, namelist_input_path: str, run_days: int, max_dom: int, start_date: datetime, end_date: datetime, num_proc: int, wrfout_saved_domain: int, opts=None):
     """
@@ -355,36 +370,6 @@ def run_wrf(wps_path: str, wrf_path: str, wrfout_path: str, namelist_input_path:
         sys.exit("ERROR: WRF Model - Check namelist.input configuration")
 
     move_wrf_outputs(wrf_path, wrfout_path)
-
-    log_files = glob.glob(f"{wrf_path}/rsl.*")
-    if log_files:
-        first_file = os.path.basename(log_files[0])
-        timestamp_match = re.search(r'\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2}', first_file)
-        if timestamp_match:
-            first_time = datetime.strptime(timestamp_match.group(), "%Y-%m-%d_%H:%M:%S")
-        else:
-            first_time = start_date
-        log_dir = f"{wrfout_path}/{first_time.strftime('%Y-%m-%d')}/logs"
-        os.makedirs(log_dir, exist_ok=True)
-        for log in log_files:
-            subprocess.run([f"mv {log} {log_dir}/"], shell=True, cwd=wrf_path)
-            logging.info(f"INFO: Moved {log} to {log_dir}")
-
-
-
-    log_files = glob.glob(f"{wrf_path}/rsl.*")
-    if log_files:
-        first_file = os.path.basename(log_files[0])
-        timestamp_match = re.search(r'\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2}', first_file)
-        if timestamp_match:
-            first_time = datetime.strptime(timestamp_match.group(), "%Y-%m-%d_%H:%M:%S")
-        else:
-            first_time = start_date
-        log_dir = f"{wrfout_path}/{first_time.strftime('%Y-%m-%d')}/logs"
-        os.makedirs(log_dir, exist_ok=True)
-        for log in log_files:
-            subprocess.run([f"mv {log} {log_dir}/"], shell=True, cwd=wrf_path)
-            logging.info(f"INFO: Moved {log} to {log_dir}")
 
 def calculate_execution_time(start: float, stop: float):
     """
