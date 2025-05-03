@@ -4,8 +4,6 @@ WPS/WPS_GEOG/
 
 gfs_dataset/
 wrf_output/
-plots/
-validation_plots/
 Vtable
 
 __pycache__/

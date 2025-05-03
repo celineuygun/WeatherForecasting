@@ -15,8 +15,9 @@ def mean_absolute_percentage_error(y_true, y_pred):
     return np.mean(mape) * 100
 
 def create_multi_horizon_targets(df, target_col, horizons):
-    target_df = pd.concat([df[target_col].shift(-h).rename(f"{target_col}_t+{h}") for h in horizons], axis=1)
-    return target_df.dropna()
+    return pd.concat([
+        df[target_col].shift(-h).rename(f"{target_col}_t+{h}") for h in horizons
+    ], axis=1).dropna()
 
 def evaluate_forecast(y_true, y_pred):
     mae = mean_absolute_error(y_true, y_pred)
@@ -27,76 +28,95 @@ def evaluate_forecast(y_true, y_pred):
     mape = mean_absolute_percentage_error(y_true, y_pred)
     return mae, mse, rmse, r2, evs, mape
 
-def train_and_forecast(raw_csv_path, forecast_horizon=6):
+def train_and_forecast(raw_csv_path, forecast_horizon=6, target_variables=["temperature_c", "humidity", "wind_speed"]):
     os.makedirs("results", exist_ok=True)
-
-    station_data = preprocess_synop_data(raw_csv_path)
-    models = get_models()
-    scale_needed = ['Linear Regression', 'SVM', 'KNN']
     horizons = list(range(1, forecast_horizon + 1))
+    scale_needed = {'Linear Regression', 'SVM', 'KNN'}
+    station_data = preprocess_synop_data(raw_csv_path, target_variables=target_variables)
+    models = get_models()
 
-    all_metrics, all_predictions = [], [] 
+    for variable in target_variables:
+        print(f"\n==================== {variable.upper()} ====================\n")
+        all_metrics, all_predictions = [], []
 
-    for station_id, data in station_data.items():
-        print(f"\nINFO: Training on station {station_id}")
+        for station_id, data in station_data.items():
+            print(f"\nINFO: Training on station {station_id} — variable: {variable}")
 
-        X_train = data['X_train'].copy().drop(columns=['split'], errors='ignore')
-        X_test = data['X_test'].copy().drop(columns=['split'], errors='ignore')
+            df_train = data['train_df'].copy()
+            df_test = data['test_df'].copy()
 
-        y_train, y_test = data['y_train'].copy(), data['y_test'].copy()
+            y_train = df_train[variable]
+            y_test = df_test[variable]
 
-        df_train = X_train.copy()
-        df_test = X_test.copy()
-        df_train['target'] = y_train
-        df_test['target'] = y_test
+            X_train = df_train.drop(columns=['datetime'] + target_variables)
+            X_test = df_test.drop(columns=['datetime'] + target_variables)
 
-        df_train.dropna(inplace=True)
-        df_test.dropna(inplace=True)
+            df_train = X_train.copy()
+            df_test = X_test.copy()
+            df_train['target'] = y_train
+            df_test['target'] = y_test
 
-        y_train_multi = create_multi_horizon_targets(df_train, 'target', horizons)
-        y_test_multi = create_multi_horizon_targets(df_test, 'target', horizons)
-        X_train = df_train.iloc[:len(y_train_multi)].drop(columns=['target'])
-        X_test = df_test.iloc[:len(y_test_multi)].drop(columns=['target'])
+            df_train.dropna(inplace=True)
+            df_test.dropna(inplace=True)
 
-        for model_name, base_model in models.items():
-            print(f"  ➤ {model_name}")
+            y_train_multi = create_multi_horizon_targets(df_train, 'target', horizons)
+            y_test_multi = create_multi_horizon_targets(df_test, 'target', horizons)
+            X_train = df_train.iloc[:len(y_train_multi)].drop(columns=['target'])
+            X_test = df_test.iloc[:len(y_test_multi)].drop(columns=['target'])
 
-            if model_name in scale_needed:
-                scaler = MinMaxScaler()
-                X_train_scaled = scaler.fit_transform(X_train)
-                X_test_scaled = scaler.transform(X_test)
-            else:
-                X_train_scaled = X_train
-                X_test_scaled = X_test
+            for model_name, base_model in models.items():
+                print(f"  ➤ {model_name}")
 
-            model = MultiOutputRegressor(base_model)
-            model.fit(X_train_scaled, y_train_multi)
-            y_pred = model.predict(X_test_scaled)
-            y_train_pred = model.predict(X_train_scaled)
+                if model_name in scale_needed:
+                    scaler = MinMaxScaler()
+                    X_train_scaled = scaler.fit_transform(X_train)
+                    X_test_scaled = scaler.transform(X_test)
+                else:
+                    X_train_scaled = X_train
+                    X_test_scaled = X_test
 
-            train_r2 = r2_score(y_train_multi, y_train_pred)
-            test_r2 = r2_score(y_test_multi, y_pred)
+                model = MultiOutputRegressor(base_model)
+                model.fit(X_train_scaled, y_train_multi)
+                y_pred = model.predict(X_test_scaled)
+                y_train_pred = model.predict(X_train_scaled)
 
-            for i, step in enumerate(horizons):
-                yt, yp = y_test_multi.iloc[:, i], y_pred[:, i]
-                mae, mse, rmse, r2s, evs, mape = evaluate_forecast(yt, yp)
+                train_r2 = r2_score(y_train_multi, y_train_pred)
+                test_r2 = r2_score(y_test_multi, y_pred)
 
-                all_metrics.append({
-                    'Station': station_id, 'Model': model_name, 'Step': step,
-                    'Train R2': train_r2, 'Test R2': test_r2,
-                    'MAE': mae, 'MSE': mse, 'RMSE': rmse,
-                    'R2 Step': r2s, 'EVS': evs, 'MAPE': mape
-                })
+                for i, step in enumerate(horizons):
+                    yt = y_test_multi.iloc[:, i]
+                    yp = y_pred[:, i]
+                    mae, mse, rmse, r2s, evs, mape = evaluate_forecast(yt, yp)
 
-                all_predictions.extend([
-                    {'Station': station_id, 'Model': model_name, 'Step': step,
-                     'True': true_val, 'Predicted': pred_val}
-                    for true_val, pred_val in zip(yt.values, yp)
-                ])
+                    all_metrics.append({
+                        'Variable': variable, 'Station': station_id,
+                        'Model': model_name, 'Step': step,
+                        'Train R2': train_r2, 'Test R2': test_r2,
+                        'MAE': mae, 'MSE': mse,
+                        'RMSE': rmse, 'R2 Step': r2s,
+                        'EVS': evs, 'MAPE': mape
+                    })
 
-    pd.DataFrame(all_metrics).to_csv("results/metrics.csv", index=False)
-    pd.DataFrame(all_predictions).to_csv("results/predictions.csv", index=False)
-    print("\nINFO: Saved results/metrics.csv and results/predictions.csv")
+                    all_predictions.extend([
+                        {'Variable': variable, 'Station': station_id, 'Model': model_name,
+                         'Step': step, 'True': t, 'Predicted': p}
+                        for t, p in zip(yt.values, yp)
+                    ])
+
+        metrics_df = pd.DataFrame(all_metrics)
+        preds_df = pd.DataFrame(all_predictions)
+
+        metrics_path = f"results/metrics_{variable}.csv"
+        preds_path = f"results/predictions_{variable}.csv"
+
+        metrics_df.to_csv(metrics_path, index=False)
+        preds_df.to_csv(preds_path, index=False)
+
+        print(f"\nINFO: Saved {metrics_path} and {preds_path}")
 
 if __name__ == "__main__":
-    train_and_forecast("dataset/synop_data.csv", forecast_horizon=6)
+    train_and_forecast(
+        raw_csv_path="dataset/synop_data.csv",
+        forecast_horizon=6,
+        target_variables=["temperature_c", "humidity", "wind_speed"]
+    )
