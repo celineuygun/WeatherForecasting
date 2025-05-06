@@ -6,53 +6,53 @@ from sklearn.tree import DecisionTreeRegressor
 
 models = {}
 
-models["Linear Regression"] = LinearRegression()
+# models["Linear Regression"] = LinearRegression()
 
-models["Random Forest"] = RandomForestRegressor(
-    n_estimators=200,
-    max_depth=20,
-    min_samples_split=5,
-    random_state=42,
-    n_jobs=-1
-)
+# models["Random Forest"] = RandomForestRegressor(
+#     n_estimators=200,
+#     max_depth=20,
+#     min_samples_split=5,
+#     random_state=42,
+#     n_jobs=-1
+# )
 
-models["Gradient Boosting"] = GradientBoostingRegressor(
-    n_estimators=300,
-    learning_rate=0.05,
-    max_depth=4,
-    min_samples_split=4,
-    random_state=42
-)
+# models["Gradient Boosting"] = GradientBoostingRegressor(
+#     n_estimators=200,
+#     learning_rate=0.05,
+#     max_depth=4,
+#     min_samples_split=4,
+#     random_state=42
+# )
 
-models["SVM"] = SVR(
-    kernel='rbf',
-    C=10,
-    epsilon=0.05
-)
+# models["SVM"] = SVR(
+#     kernel='rbf',
+#     C=10,
+#     epsilon=0.05
+# )
 
-models["KNN"] = KNeighborsRegressor(
-    n_neighbors=3,
-    weights='distance'
-)
+# models["KNN"] = KNeighborsRegressor(
+#     n_neighbors=3,
+#     weights='distance'
+# )
 
-models["Decision Tree"] = DecisionTreeRegressor(
-    max_depth=10,
-    min_samples_split=5,
-    random_state=42
-)
+# models["Decision Tree"] = DecisionTreeRegressor(
+#     max_depth=10,
+#     min_samples_split=5,
+#     random_state=42
+# )
 
-try:
-    from lightgbm import LGBMRegressor
-    models["LightGBM"] = LGBMRegressor(
-        n_estimators=300,
-        learning_rate=0.05,
-        num_leaves=31,
-        max_depth=-1,
-        random_state=42,
-        verbose=-1
-    )
-except ImportError:
-    print("ERROR: LightGBM not installed. Skipping LGBMRegressor.")
+# try:
+#     from lightgbm import LGBMRegressor
+#     models["LightGBM"] = LGBMRegressor(
+#         n_estimators=300,
+#         learning_rate=0.05,
+#         num_leaves=31,
+#         max_depth=-1,
+#         random_state=42,
+#         verbose=-1
+#     )
+# except ImportError:
+#     print("ERROR: LightGBM not installed. Skipping LGBMRegressor.")
 
 try:
     from xgboost import XGBRegressor
