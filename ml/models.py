@@ -41,18 +41,18 @@ models = {}
 #     random_state=42
 # )
 
-# try:
-#     from lightgbm import LGBMRegressor
-#     models["LightGBM"] = LGBMRegressor(
-#         n_estimators=300,
-#         learning_rate=0.05,
-#         num_leaves=31,
-#         max_depth=-1,
-#         random_state=42,
-#         verbose=-1
-#     )
-# except ImportError:
-#     print("ERROR: LightGBM not installed. Skipping LGBMRegressor.")
+try:
+    from lightgbm import LGBMRegressor
+    models["LightGBM"] = LGBMRegressor(
+        n_estimators=300,
+        learning_rate=0.05,
+        num_leaves=31,
+        max_depth=-1,
+        random_state=42,
+        verbose=-1
+    )
+except ImportError:
+    print("ERROR: LightGBM not installed. Skipping LGBMRegressor.")
 
 try:
     from xgboost import XGBRegressor

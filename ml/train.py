@@ -2,11 +2,12 @@ import os
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, explained_variance_score
-from sklearn.preprocessing import MinMaxScaler, PowerTransformer
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.feature_selection import VarianceThreshold, SelectFromModel
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.feature_selection import VarianceThreshold
+from scipy.stats import ttest_rel
 from models import get_models
 from preprocess import preprocess_synop_data
 
@@ -26,102 +27,87 @@ def evaluate_forecast(y_true, y_pred):
     mape = mean_absolute_percentage_error(y_true, y_pred)
     return mae, mse, rmse, r2, evs, mape
 
+def compare_models_ttest(metrics_df, variable, horizon):
+    print(f"\n[STAT TEST] Variable: {variable}, Horizon: t+{horizon}")
+    subset = metrics_df[(metrics_df['Variable'] == variable) & (metrics_df['Step'] == horizon)]
+    models = subset['Model'].unique()
+    metrics_to_test = ['MAE', 'RMSE', 'R2 Step']
+
+    for metric in metrics_to_test:
+        print(f"\nMetric: {metric}")
+        for i in range(len(models)):
+            for j in range(i + 1, len(models)):
+                model_a = models[i]
+                model_b = models[j]
+
+                scores_a = subset[subset['Model'] == model_a][metric].values
+                scores_b = subset[subset['Model'] == model_b][metric].values
+
+                if len(scores_a) != len(scores_b):
+                    print(f"  ✗ Skipping {model_a} vs {model_b} (unequal sample sizes)")
+                    continue
+
+                t_stat, p_value = ttest_rel(scores_a, scores_b)
+                print(f"  ➤ {model_a} vs {model_b}: t={t_stat:.3f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else '(not significant)'}")
+
+def rfcav_feature_selection(X, y, n_estimators=100, max_depth=5, var_thresh=0.01):
+    vt = VarianceThreshold(threshold=var_thresh)
+    X_var = pd.DataFrame(vt.fit_transform(X),
+                         columns=X.columns[vt.get_support()],
+                         index=X.index)
+
+    rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, random_state=42, n_jobs=-1)
+    rf.fit(X_var, y)
+    importances = pd.Series(rf.feature_importances_, index=X_var.columns)
+    selected_features = importances[importances > importances.median()].index.tolist()
+    return selected_features
+
+def prepare_target_shifted(y, variable, horizons):
+    y_raw = pd.concat([
+        y.shift(-h).rename(columns={variable: f"{variable}_t+{h}"}) for h in horizons
+    ], axis=1).dropna()
+    return y_raw, y_raw
+
 def run_training(train_df, test_df, variable, station_id,
                  horizons, models, scale_needed,
                  all_metrics, all_predictions,
-                 per_station=True,
-                 var_thresh=0.01,
-                 rf_n_estimators=100,
-                 rf_max_depth=5,
-                 rf_threshold='median'):
+                 selected_features):
 
     drop_cols = ['datetime', variable]
-    X_train_full = train_df.drop(columns=[c for c in drop_cols if c in train_df.columns])
-    X_test_full  = test_df.drop(columns=[c for c in drop_cols if c in test_df.columns])
+    X_train = train_df.drop(columns=[c for c in drop_cols if c in train_df.columns])
+    X_test = test_df.drop(columns=[c for c in drop_cols if c in test_df.columns])
 
     for other_var in ['temperature_c', 'humidity', 'wind_speed']:
         if other_var != variable:
-            cols_to_drop = [col for col in X_train_full.columns 
-                            if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")]
-            X_train_full.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-            X_test_full.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+            X_train = X_train.drop(columns=[col for col in X_train.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
+            X_test = X_test.drop(columns=[col for col in X_test.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
 
-    y_train = train_df[[variable]].copy()
-    y_test  = test_df[[variable]].copy()
+    y_train_multi, y_train_raw = prepare_target_shifted(train_df[[variable]], variable, horizons)
+    y_test_raw, _ = prepare_target_shifted(test_df[[variable]], variable, horizons)
 
-    y_train_raw = pd.concat([
-        y_train.shift(-h).rename(columns={variable: f"{variable}_t+{h}"}) for h in horizons
-    ], axis=1).dropna()
-    y_test_raw = pd.concat([
-        y_test.shift(-h).rename(columns={variable: f"{variable}_t+{h}"}) for h in horizons
-    ], axis=1).dropna()
-
-    X_train = X_train_full.iloc[:len(y_train_raw)].reset_index(drop=True)
-    X_test  = X_test_full.iloc[:len(y_test_raw)].reset_index(drop=True)
-    y_train_raw = y_train_raw.reset_index(drop=True)
-    y_test_raw  = y_test_raw.reset_index(drop=True)
-
-    transformers = {}
-    if variable in ['wind_speed']:
-        transformers[variable] = PowerTransformer(method='yeo-johnson')
-        y_train_arr = transformers[variable].fit_transform(y_train_raw.values)
-        y_train_multi = pd.DataFrame(y_train_arr, columns=y_train_raw.columns)
-    else:
-        y_train_multi = y_train_raw.copy()
-
-    vt = VarianceThreshold(threshold=var_thresh)
-    X_tr_v = pd.DataFrame(vt.fit_transform(X_train),
-                          columns=X_train.columns[vt.get_support()],
-                          index=X_train.index)
-    X_te_v = pd.DataFrame(vt.transform(X_test),
-                          columns=X_tr_v.columns,
-                          index=X_test.index)
-
-    selector_rf = RandomForestRegressor(n_estimators=rf_n_estimators,
-                                        max_depth=rf_max_depth,
-                                        random_state=42,
-                                        n_jobs=-1)
-    selector_rf.fit(X_tr_v, y_train_multi)
-    sfm = SelectFromModel(selector_rf, threshold=rf_threshold, prefit=True)
-    support = sfm.get_support()
-
-    selected_feats = list(set(X_tr_v.columns[support]) | set([col for col in X_tr_v.columns if col.startswith('station_')]))
-    print(f"\n[FEATURE SELECTION] {station_id} — After SelectFromModel")
-    print(f"  ➤ Selected features ({len(selected_feats)}): {selected_feats}")
-
-    X_tr_sel = X_tr_v[selected_feats]
-    X_te_sel = X_te_v[selected_feats]
+    X_train = X_train.iloc[:len(y_train_multi)][selected_features].reset_index(drop=True)
+    X_test = X_test.iloc[:len(y_test_raw)][selected_features].reset_index(drop=True)
 
     for model_name, base_model in models.items():
-        print(f"\n  ➤ Training {model_name}")
-        if (not per_station) or (model_name in scale_needed):
+        print(f"  ➤ Training {model_name}")
+        if model_name in scale_needed:
             scaler = MinMaxScaler()
-            X_tr_scaled = pd.DataFrame(scaler.fit_transform(X_tr_sel), columns=selected_feats)
-            X_te_scaled = pd.DataFrame(scaler.transform(X_te_sel), columns=selected_feats)
-        else:
-            X_tr_scaled, X_te_scaled = X_tr_sel.copy(), X_te_sel.copy()
+            X_train = pd.DataFrame(scaler.fit_transform(X_train), columns=selected_features)
+            X_test = pd.DataFrame(scaler.transform(X_test), columns=selected_features)
 
-        imp = SimpleImputer(strategy='mean')
-        X_tr_imp = pd.DataFrame(imp.fit_transform(X_tr_scaled), columns=selected_feats)
-        X_te_imp = pd.DataFrame(imp.transform(X_te_scaled), columns=selected_feats)
+        imputer = SimpleImputer(strategy='mean')
+        X_train_imp = pd.DataFrame(imputer.fit_transform(X_train), columns=selected_features)
+        X_test_imp = pd.DataFrame(imputer.transform(X_test), columns=selected_features)
 
         reg = MultiOutputRegressor(base_model)
-        reg.fit(X_tr_imp.values, y_train_multi.values)
+        reg.fit(X_train_imp, y_train_multi)
 
-        y_train_pred_raw = reg.predict(X_tr_imp.values)
-        y_train_pred = (
-            transformers[variable].inverse_transform(y_train_pred_raw)
-            if variable in transformers else y_train_pred_raw
-        )
-        train_r2 = r2_score(y_train_raw.values, y_train_pred)
-
-        y_pred_raw = reg.predict(X_te_imp.values)
-        y_pred = (
-            transformers[variable].inverse_transform(y_pred_raw)
-            if variable in transformers else y_pred_raw
-        )
+        y_pred = reg.predict(X_test_imp)
+        train_pred = reg.predict(X_train_imp)
 
         overall_r2 = r2_score(y_test_raw.values, y_pred)
+        train_r2 = r2_score(y_train_raw.values, train_pred)
+
         for i, h in enumerate(horizons):
             yt = y_test_raw.iloc[:, i]
             yp = y_pred[:, i]
@@ -151,18 +137,13 @@ def run_training(train_df, test_df, variable, station_id,
                 } for true, pred in zip(yt, yp)
             ])
 
-def train_and_forecast(raw_csv_path,
-                       forecast_horizon=6,
-                       target_variables=None,
-                       per_station=True):
+def train_and_forecast(raw_csv_path, forecast_horizon=6, target_variables=None, per_station=True):
     if target_variables is None:
         target_variables = ['temperature_c', 'humidity', 'wind_speed']
     horizons = list(range(1, forecast_horizon + 1))
     scale_needed = {'Linear Regression', 'SVM', 'KNN'}
 
-    station_data = preprocess_synop_data(path=raw_csv_path,
-                                         targets=target_variables,
-                                         per_station=per_station)
+    station_data = preprocess_synop_data(path=raw_csv_path, targets=target_variables, per_station=per_station)
     models = get_models()
     all_metrics = []
 
@@ -172,32 +153,51 @@ def train_and_forecast(raw_csv_path,
     for var in target_variables:
         print(f"\n==================== {var.upper()} ====================\n")
         all_predictions = []
-        if per_station:
-            for sid, data in station_data.items():
-                run_training(data['train_df'], data['test_df'],
-                            var, sid,
-                            horizons, models,
-                            scale_needed,
-                            all_metrics, all_predictions,
-                            per_station)
-        else:
-            run_training(station_data['train_df'], station_data['test_df'],
-                        var, "merged",
-                        horizons, models,
-                        scale_needed,
-                        all_metrics, all_predictions,
-                        per_station)
 
-        pd.DataFrame(all_predictions).to_csv(
-            os.path.join(results_dir, f"predictions_{var}.csv"), index=False)
-    pd.DataFrame(all_metrics).to_csv(
-        os.path.join(results_dir, "metrics.csv"), index=False)
+        all_X = []
+        all_y = []
+
+        for sid, data in station_data.items():
+            df = data['train_df'].drop(columns=['datetime', var], errors='ignore')
+            for other_var in ['temperature_c', 'humidity', 'wind_speed']:
+                if other_var != var:
+                    df = df.drop(columns=[col for col in df.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
+            all_X.append(df)
+            all_y.append(data['train_df'][[var]])
+
+        full_X = pd.concat(all_X, axis=0, ignore_index=True)
+        full_y = pd.concat(all_y, axis=0, ignore_index=True).dropna()
+
+        y_for_selection, _ = prepare_target_shifted(full_y, var, horizons)
+        selected_features = rfcav_feature_selection(full_X.iloc[:len(y_for_selection)], y_for_selection)
+
+        print(f"[RFCAV] Common selected features ({len(selected_features)}): {selected_features}")
+
+        for sid, data in station_data.items():
+            print(f"\n[Station {sid}]")
+            run_training(data['train_df'], data['test_df'],
+                         var, sid,
+                         horizons, models,
+                         scale_needed,
+                         all_metrics, all_predictions,
+                         selected_features)
+
+        pd.DataFrame(all_predictions).to_csv(os.path.join(results_dir, f"predictions_{var}.csv"), index=False)
+
+    pd.DataFrame(all_metrics).to_csv(os.path.join(results_dir, "metrics.csv"), index=False)
     print("\nINFO: Training and forecasting completed.")
 
 if __name__ == '__main__':
+    forecast_horizon = 6
     train_and_forecast(
         raw_csv_path='dataset/synop.csv',
-        forecast_horizon=6,
-        target_variables=['temperature_c', 'humidity', 'wind_speed'],
+        forecast_horizon=forecast_horizon,
+        target_variables=['temperature_c'],
         per_station=True
     )
+
+    metrics_df = pd.read_csv("results/per_station/metrics.csv")
+    for var in ['temperature_c']:
+        for h in range(1, forecast_horizon + 1):
+            compare_models_ttest(metrics_df, var, h)
+

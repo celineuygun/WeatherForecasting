@@ -44,10 +44,6 @@ def enrich_features(df):
     df['avp'] = ea
     df['vpd'] = es - ea
 
-    for col in ['wind_speed', 'temperature_c', 'humidity', 'dew_point', 'visibility']:
-        df[f'{col}_roll_mean_3'] = df[col].rolling(window=3, min_periods=1).mean()
-        df[f'{col}_roll_std_3'] = df[col].rolling(window=3, min_periods=1).std().fillna(0)
-
     if 'wind_dir_deg' in df.columns:
         radians = np.deg2rad(df['wind_dir_deg'])
         df['sin_wind_dir'] = np.sin(radians)
