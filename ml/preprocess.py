@@ -12,9 +12,9 @@ def add_input_lags(df, target_col, lags):
 
 def add_temporal_features(df, datetime_col='datetime'):
     df['hour'] = df[datetime_col].dt.hour
-    df['month'] = df[datetime_col].dt.month
-    df['sin_month'] = np.sin(2 * np.pi * df['month'] / 12)
-    df['cos_month'] = np.cos(2 * np.pi * df['month'] / 12)
+    month = df[datetime_col].dt.month
+    df['sin_month'] = np.sin(2 * np.pi * month / 12)
+    df['cos_month'] = np.cos(2 * np.pi * month / 12)
     return df
 
 def add_weather_regime(df, features=None, n_clusters=4):
@@ -37,6 +37,8 @@ def add_weather_regime(df, features=None, n_clusters=4):
 def enrich_features(df):
     df['sin_hour'] = np.sin(2 * np.pi * df['hour'] / 24)
     df['cos_hour'] = np.cos(2 * np.pi * df['hour'] / 24)
+    df.drop(columns=['hour'], inplace=True)
+
     df['temp_dew_diff'] = df['temperature_c'] - df['dew_point']
     es = 0.6108 * np.exp(17.27 * df['temperature_c'] / (df['temperature_c'] + 237.3))
     ea = 0.6108 * np.exp(17.27 * df['dew_point'] / (df['dew_point'] + 237.3))
@@ -92,6 +94,14 @@ def report_missing(df, name=""):
         print(f"\n[MISSING DATA] {name}:")
         print(missing_cols)
 
+def apply_lags_and_outliers(df, targets, lags, label):
+    df = df.sort_values('datetime').reset_index(drop=True)
+    for t in targets:
+        if t in df.columns:
+            df = handle_outliers(df, t, window=48, label=label)
+            df = add_input_lags(df, t, lags)
+    return df.dropna().reset_index(drop=True)
+
 def preprocess_one(df, targets, lags, label):
     df = df.sort_values('datetime').reset_index(drop=True)
     df = df.set_index('datetime')
@@ -102,24 +112,20 @@ def preprocess_one(df, targets, lags, label):
         print(f"\n[COLUMN DROPPING] {label} — Dropping columns with >70% missing: {to_drop}")
         df = df.drop(columns=to_drop)
 
-    num_cols = [col for col in [
-        'station_id','datetime','sea_level_pressure','press_var_3h','press_var_24h','baro_trend',
-        'wind_dir','wind_speed','temperature_c','dew_point','humidity','visibility','cloud_cover',
-        'station_pressure','latitude','longitude','altitude','rafale_10min','rafales_periode',
-        'precip_1h','precip_3h','precip_6h','precip_12h','precip_24h'
-    ] if col in df.columns]
+    zero_fill = [col for col in ['precip_1h', 'precip_3h', 'precip_6h', 'precip_12h', 'precip_24h', 'rafale_10min'] if col in df.columns]
+    for col in zero_fill:
+        df[col] = df[col].fillna(0)
+
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     report_missing(df[num_cols], name=label)
-    df[num_cols] = df[num_cols].apply(pd.to_numeric, errors='coerce')
     df[num_cols] = df[num_cols].interpolate(method='time').ffill().bfill()
     df = df.reset_index()
 
     df = add_temporal_features(df)
-    for t in targets:
-        if t in df.columns:
-            df = handle_outliers(df, t, window=48, label=label)
-            df = add_input_lags(df, t, lags)
     df = enrich_features(df)
-    df = df.dropna().reset_index(drop=True)
+    df = df.dropna(subset=[t for t in targets if t in df.columns]).reset_index(drop=True)
+    df = df.reset_index(drop=True)
+
     validate_preprocessing(df, label)
     return df
 
@@ -153,32 +159,36 @@ def preprocess_synop_data(path, lags=[1,3,6,12,24], targets=None, per_station=Tr
     ]
 
     df['dew_point'] = df['dew_point'] - 273.15
-    df['baro_trend'] = df['baro_trend'].fillna(df['baro_trend'].mode().iloc[0]).astype(str)
-    df['wind_dir'] = df['wind_dir'].ffill().bfill().astype(str)
+    df['baro_trend'] = df['baro_trend'].fillna(df['baro_trend'].mode().iloc[0])
+    dir_map = {'N':0,'NE':45,'E':90,'SE':135,'S':180,'SW':225,'W':270,'NW':315}
+    df['wind_dir_deg'] = pd.to_numeric(df['wind_dir'], errors='coerce')
+    df.loc[df['wind_dir_deg'].isna(), 'wind_dir_deg'] = df['wind_dir'].map(dir_map)
+
+    df['wind_dir_deg'] = pd.to_numeric(df['wind_dir_deg'], errors='coerce')
 
     os.makedirs('preprocessed_dataset', exist_ok=True)
-    dir_map = {'N':0,'NE':45,'E':90,'SE':135,'S':180,'SW':225,'W':270,'NW':315}
 
     data, all_dfs = {}, []
     for sid, grp in df.groupby('station_id'):
         g = grp.copy()
         g = pd.get_dummies(g, columns=['baro_trend'], prefix='trend')
-        g['wind_dir_deg'] = pd.to_numeric(g['wind_dir'], errors='coerce')
-        g['wind_dir_deg'] = g['wind_dir_deg'].fillna(g['wind_dir'].map(dir_map))
-
         proc = preprocess_one(g, targets, lags, f'station {sid}')
+
         splits = split_and_return(proc)
-        train_df = splits['train_df']
-        test_df  = splits['test_df']
+        train_df = apply_lags_and_outliers(splits['train_df'], targets, lags, f"{sid} (train)")
+        test_df  = apply_lags_and_outliers(splits['test_df'], targets, lags, f"{sid} (test)")
 
         data[sid] = {'train_df': train_df, 'test_df': test_df}
         all_dfs.append(pd.concat([train_df, test_df]))
 
     full = pd.concat(all_dfs).sort_values("datetime").reset_index(drop=True)
+
     if not per_station:
         full = pd.get_dummies(full, columns=['station_id'], prefix='station')
+        full.drop(columns=['station_id'], inplace=True, errors='ignore')
 
     full.to_csv('preprocessed_dataset/preprocessed_synop.csv', index=False)
+
     if per_station:
         return data
     else:

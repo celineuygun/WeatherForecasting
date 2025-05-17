@@ -8,13 +8,10 @@ base_path = os.path.join("results", mode)
 metrics_path = os.path.join(base_path, "metrics.csv")
 
 model_abbr = {
-    "Decision Tree": "DT",
-    "Gradient Boosting": "GB",
-    "KNN": "KNN",
     "Linear Regression": "LR",
     "Random Forest": "RF",
-    "SVM": "SVM",
-    "LightGBM": "LGBM",
+    "Gradient Boosting": "GB",
+    "Neural Network": "NN",
     "XGBoost": "XGB"
 }
 

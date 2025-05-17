@@ -5,11 +5,17 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, e
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.feature_selection import VarianceThreshold
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.feature_selection import mutual_info_regression
+from sklearn.base import clone
+from collections import Counter
 from scipy.stats import ttest_rel
 from models import get_models
 from preprocess import preprocess_synop_data
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.feature_selection import mutual_info_regression
 
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
@@ -50,17 +56,69 @@ def compare_models_ttest(metrics_df, variable, horizon):
                 t_stat, p_value = ttest_rel(scores_a, scores_b)
                 print(f"  ➤ {model_a} vs {model_b}: t={t_stat:.3f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else '(not significant)'}")
 
-def rfcav_feature_selection(X, y, n_estimators=100, max_depth=5, var_thresh=0.01):
-    vt = VarianceThreshold(threshold=var_thresh)
-    X_var = pd.DataFrame(vt.fit_transform(X),
-                         columns=X.columns[vt.get_support()],
-                         index=X.index)
+def plot_mutual_info(X, y, top_n=30, min_mi=0.0):
+    """
+    Daha temiz ve sıralı MI grafiği çizer.
+    
+    Params:
+    - X: pd.DataFrame
+    - y: pd.Series
+    - top_n: en çok gösterilecek feature sayısı
+    - min_mi: minimum MI değeri filtresi
 
-    rf = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, random_state=42, n_jobs=-1)
-    rf.fit(X_var, y)
-    importances = pd.Series(rf.feature_importances_, index=X_var.columns)
-    selected_features = importances[importances > importances.median()].index.tolist()
-    return selected_features
+    Returns:
+    - pd.Series of MI scores (tümü)
+    """
+    mi = mutual_info_regression(X, y, discrete_features='auto')
+
+    mi_series = pd.Series(mi, index=X.columns)
+    mi_series = mi_series.dropna()
+    mi_series = mi_series[mi_series.index.notnull()]
+    mi_series = mi_series[mi_series >= min_mi].sort_values()
+
+    top_features = mi_series[-top_n:]
+
+    plt.figure(figsize=(8, max(4, len(top_features) * 0.3)))
+    sns.barplot(x=top_features.values, y=top_features.index, orient='h', color='skyblue')
+    plt.xlabel("Mutual Information Score")
+    plt.title(f"Top {len(top_features)} Features by MI with Target")
+    plt.grid(axis='x', linestyle='--', alpha=0.6)
+    plt.tight_layout()
+    plt.show()
+
+    return mi_series
+
+def mutual_info_feature_selection(X, y, top_k=None, min_mi=None, verbose=True):
+    """
+    Flexible mutual information-based feature selection.
+
+    Parameters:
+    - X: pd.DataFrame, feature matrix
+    - y: pd.Series, target variable
+    - top_k: int or None, max number of top features to keep
+    - min_mi: float or None, minimum mutual information threshold
+    - verbose: bool, print selected features
+
+    Returns:
+    - List of selected feature names
+    """
+    # plot_mutual_info(X, y, top_n=top_k, min_mi=min_mi)
+
+    mi = mutual_info_regression(X, y, discrete_features='auto')
+    mi_series = pd.Series(mi, index=X.columns).sort_values(ascending=False)
+
+    if min_mi is not None:
+        mi_series = mi_series[mi_series >= min_mi]
+
+    if top_k is not None:
+        mi_series = mi_series.head(top_k)
+
+    selected = mi_series.index.tolist()
+
+    if verbose:
+        print(f"[MI SELECTION] {len(selected)} features selected (top_k={top_k}, min_mi={min_mi}): {selected}")
+
+    return selected
 
 def prepare_target_shifted(y, variable, horizons):
     y_raw = pd.concat([
@@ -141,7 +199,7 @@ def train_and_forecast(raw_csv_path, forecast_horizon=6, target_variables=None, 
     if target_variables is None:
         target_variables = ['temperature_c', 'humidity', 'wind_speed']
     horizons = list(range(1, forecast_horizon + 1))
-    scale_needed = {'Linear Regression', 'SVM', 'KNN'}
+    scale_needed = {'Linear Regression', 'Neural Network'}
 
     station_data = preprocess_synop_data(path=raw_csv_path, targets=target_variables, per_station=per_station)
     models = get_models()
@@ -154,38 +212,59 @@ def train_and_forecast(raw_csv_path, forecast_horizon=6, target_variables=None, 
         print(f"\n==================== {var.upper()} ====================\n")
         all_predictions = []
 
-        all_X = []
-        all_y = []
+        if per_station:
+            all_train_dfs = []
+            for sid, data in station_data.items():
+                df = data['train_df'].copy()
+                df["station_id"] = sid
+                all_train_dfs.append(df)
+            merged_train = pd.concat(all_train_dfs).reset_index(drop=True)
 
-        for sid, data in station_data.items():
-            df = data['train_df'].drop(columns=['datetime', var], errors='ignore')
+            X_all = merged_train.drop(columns=['datetime', var], errors='ignore')
             for other_var in ['temperature_c', 'humidity', 'wind_speed']:
                 if other_var != var:
-                    df = df.drop(columns=[col for col in df.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
-            all_X.append(df)
-            all_y.append(data['train_df'][[var]])
+                    X_all = X_all.drop(columns=[col for col in X_all.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
+            y_all = merged_train[[var]].dropna()
+            X_all = X_all.loc[y_all.index]
 
-        full_X = pd.concat(all_X, axis=0, ignore_index=True)
-        full_y = pd.concat(all_y, axis=0, ignore_index=True).dropna()
+            selected_features = mutual_info_feature_selection(
+                X_all, y_all[var], top_k=20, min_mi=0.01, verbose=True
+            )
 
-        y_for_selection, _ = prepare_target_shifted(full_y, var, horizons)
-        selected_features = rfcav_feature_selection(full_X.iloc[:len(y_for_selection)], y_for_selection)
+            for sid, data in station_data.items():
+                print(f"\n[Station {sid}]")
+                train_df = data['train_df']
+                test_df = data['test_df']
 
-        print(f"[RFCAV] Common selected features ({len(selected_features)}): {selected_features}")
+                run_training(train_df, test_df, var, sid,
+                             horizons, models, scale_needed,
+                             all_metrics, all_predictions, selected_features)
+        else:
+            data = station_data
+            train_df = data['train_df']
+            test_df = data['test_df']
 
-        for sid, data in station_data.items():
-            print(f"\n[Station {sid}]")
-            run_training(data['train_df'], data['test_df'],
-                         var, sid,
-                         horizons, models,
-                         scale_needed,
-                         all_metrics, all_predictions,
-                         selected_features)
+            print(f"\n[Global Training]")
+            X = train_df.drop(columns=['datetime', var], errors='ignore')
+            for other_var in ['temperature_c', 'humidity', 'wind_speed']:
+                if other_var != var:
+                    X = X.drop(columns=[col for col in X.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
+            y = train_df[[var]].dropna()
+            X = X.loc[y.index]
+
+            selected_features = mutual_info_feature_selection(
+                X, y[var], top_k=20, min_mi=0.01, verbose=True
+            )
+
+            run_training(train_df, test_df, var, "merged",
+                         horizons, models, scale_needed,
+                         all_metrics, all_predictions, selected_features)
 
         pd.DataFrame(all_predictions).to_csv(os.path.join(results_dir, f"predictions_{var}.csv"), index=False)
 
     pd.DataFrame(all_metrics).to_csv(os.path.join(results_dir, "metrics.csv"), index=False)
     print("\nINFO: Training and forecasting completed.")
+
 
 if __name__ == '__main__':
     forecast_horizon = 6
