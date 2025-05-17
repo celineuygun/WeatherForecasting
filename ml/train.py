@@ -1,130 +1,12 @@
 import os
 import pandas as pd
-import numpy as np
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, explained_variance_score
+from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression
-from sklearn.feature_selection import mutual_info_regression
-from sklearn.base import clone
-from collections import Counter
-from scipy.stats import ttest_rel
 from models import get_models
 from preprocess import preprocess_synop_data
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.feature_selection import mutual_info_regression
-
-def mean_absolute_percentage_error(y_true, y_pred):
-    y_true, y_pred = np.array(y_true), np.array(y_pred)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        mape = np.abs((y_true - y_pred) / y_true)
-        mape[~np.isfinite(mape)] = 0
-    return np.mean(mape) * 100
-
-def evaluate_forecast(y_true, y_pred):
-    mae = mean_absolute_error(y_true, y_pred)
-    mse = mean_squared_error(y_true, y_pred)
-    rmse = np.sqrt(mse)
-    r2 = r2_score(y_true, y_pred)
-    evs = explained_variance_score(y_true, y_pred)
-    mape = mean_absolute_percentage_error(y_true, y_pred)
-    return mae, mse, rmse, r2, evs, mape
-
-def compare_models_ttest(metrics_df, variable, horizon):
-    print(f"\n[STAT TEST] Variable: {variable}, Horizon: t+{horizon}")
-    subset = metrics_df[(metrics_df['Variable'] == variable) & (metrics_df['Step'] == horizon)]
-    models = subset['Model'].unique()
-    metrics_to_test = ['MAE', 'RMSE', 'R2 Step']
-
-    for metric in metrics_to_test:
-        print(f"\nMetric: {metric}")
-        for i in range(len(models)):
-            for j in range(i + 1, len(models)):
-                model_a = models[i]
-                model_b = models[j]
-
-                scores_a = subset[subset['Model'] == model_a][metric].values
-                scores_b = subset[subset['Model'] == model_b][metric].values
-
-                if len(scores_a) != len(scores_b):
-                    print(f"  ✗ Skipping {model_a} vs {model_b} (unequal sample sizes)")
-                    continue
-
-                t_stat, p_value = ttest_rel(scores_a, scores_b)
-                print(f"  ➤ {model_a} vs {model_b}: t={t_stat:.3f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else '(not significant)'}")
-
-def plot_mutual_info(X, y, top_n=30, min_mi=0.0):
-    """
-    Daha temiz ve sıralı MI grafiği çizer.
-    
-    Params:
-    - X: pd.DataFrame
-    - y: pd.Series
-    - top_n: en çok gösterilecek feature sayısı
-    - min_mi: minimum MI değeri filtresi
-
-    Returns:
-    - pd.Series of MI scores (tümü)
-    """
-    mi = mutual_info_regression(X, y, discrete_features='auto')
-
-    mi_series = pd.Series(mi, index=X.columns)
-    mi_series = mi_series.dropna()
-    mi_series = mi_series[mi_series.index.notnull()]
-    mi_series = mi_series[mi_series >= min_mi].sort_values()
-
-    top_features = mi_series[-top_n:]
-
-    plt.figure(figsize=(8, max(4, len(top_features) * 0.3)))
-    sns.barplot(x=top_features.values, y=top_features.index, orient='h', color='skyblue')
-    plt.xlabel("Mutual Information Score")
-    plt.title(f"Top {len(top_features)} Features by MI with Target")
-    plt.grid(axis='x', linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    plt.show()
-
-    return mi_series
-
-def mutual_info_feature_selection(X, y, top_k=None, min_mi=None, verbose=True):
-    """
-    Flexible mutual information-based feature selection.
-
-    Parameters:
-    - X: pd.DataFrame, feature matrix
-    - y: pd.Series, target variable
-    - top_k: int or None, max number of top features to keep
-    - min_mi: float or None, minimum mutual information threshold
-    - verbose: bool, print selected features
-
-    Returns:
-    - List of selected feature names
-    """
-    # plot_mutual_info(X, y, top_n=top_k, min_mi=min_mi)
-
-    mi = mutual_info_regression(X, y, discrete_features='auto')
-    mi_series = pd.Series(mi, index=X.columns).sort_values(ascending=False)
-
-    if min_mi is not None:
-        mi_series = mi_series[mi_series >= min_mi]
-
-    if top_k is not None:
-        mi_series = mi_series.head(top_k)
-
-    selected = mi_series.index.tolist()
-
-    if verbose:
-        print(f"[MI SELECTION] {len(selected)} features selected (top_k={top_k}, min_mi={min_mi}): {selected}")
-
-    return selected
-
-def prepare_target_shifted(y, variable, horizons):
-    y_raw = pd.concat([
-        y.shift(-h).rename(columns={variable: f"{variable}_t+{h}"}) for h in horizons
-    ], axis=1).dropna()
-    return y_raw, y_raw
+from utils import evaluate, compare_models_ttest, prepare_target_shifted, mutual_info_feature_selection
 
 def run_training(train_df, test_df, variable, station_id,
                  horizons, models, scale_needed,
@@ -169,7 +51,7 @@ def run_training(train_df, test_df, variable, station_id,
         for i, h in enumerate(horizons):
             yt = y_test_raw.iloc[:, i]
             yp = y_pred[:, i]
-            mae, mse, rmse, r2s, evs, mape = evaluate_forecast(yt, yp)
+            mae, mse, rmse, r2s, evs, mape = evaluate(yt, yp)
             all_metrics.append({
                 'Variable': variable,
                 'Station': station_id,
@@ -272,7 +154,7 @@ if __name__ == '__main__':
         raw_csv_path='dataset/synop.csv',
         forecast_horizon=forecast_horizon,
         target_variables=['temperature_c'],
-        per_station=True
+        per_station=False
     )
 
     metrics_df = pd.read_csv("results/per_station/metrics.csv")

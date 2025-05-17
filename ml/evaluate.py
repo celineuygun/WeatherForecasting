@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-per_station = True  # Set to False for merged data
+per_station = False  # Set to False for merged data
 
 mode = "per_station" if per_station else "merged"
 base_path = os.path.join("results", mode)
