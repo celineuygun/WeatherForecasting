@@ -128,53 +128,97 @@ def apply_weather_regime(df, pca, km, feats, label=""):
     return df
 
 def preprocess_synop_data(path, targets=None, per_station=True):
+    """
+    Preprocess SYNOP data, either per station or merged global dataset.
+
+    Returns:
+      - If per_station=True: dict of station_id -> {'train_df', 'test_df'}
+      - If per_station=False: {'train_df', 'test_df'} for merged data
+    """
     if targets is None:
         targets = ['temperature_c','humidity','wind_speed']
 
     df_raw = read_and_prepare(path)
     os.makedirs('preprocessed_dataset', exist_ok=True)
-    output, merged = {}, []
     feats = targets + ['sea_level_pressure']
 
-    print("\nINFO: Processing each station separately.")
-    for sid, grp in df_raw.groupby('station_id'):
-        print(f"\n[Station {sid}]")
-        tr_raw, te_raw = split_train_test(grp.copy())
+    if per_station:
+        print("\nINFO: Processing each station separately.")
+        output, merged = {}, []
+        for sid, grp in df_raw.groupby('station_id'):
+            print(f"\n[Station {sid}]")
+            tr_raw, te_raw = split_train_test(grp.copy())
 
-        print("  a) Train preprocessing:")
-        tr = drop_high_missing(tr_raw, label='train')
-        tr = fill_precip_zero(tr, label='train')
-        tr = interpolate_time(tr, label='train')
-        tr = handle_outliers(tr, targets, label='train')
-        tr = add_lags(tr, targets, label='train')
-        tr = add_temporal(tr, label='train')
-        tr = compute_vpd(tr, label='train')
-        pca, km = fit_weather_regime(tr, feats, label='train')
-        tr = apply_weather_regime(tr, pca, km, feats, label='train')
-        tr.dropna(inplace=True)
-        print(f"  ✔ Train subset ready ({len(tr)} rows)")
+            # Train
+            print("  a) Train preprocessing:")
+            tr = drop_high_missing(tr_raw, 'train')
+            tr = fill_precip_zero(tr, 'train')
+            tr = interpolate_time(tr, 'train')
+            tr = handle_outliers(tr, targets, 'train')
+            tr = add_lags(tr, targets, 'train')
+            tr = add_temporal(tr, 'train')
+            tr = compute_vpd(tr, 'train')
+            pca, km = fit_weather_regime(tr, feats, 'train')
+            tr = apply_weather_regime(tr, pca, km, feats, 'train')
+            tr.dropna(inplace=True)
+            print(f"  ✔ Train subset ready ({len(tr)} rows)")
 
-        print("  b) Test preprocessing:")
-        te = drop_high_missing(te_raw, label='test')
-        te = fill_precip_zero(te, label='test')
-        te = interpolate_time(te, label='test')
-        te = add_lags(te, targets, label='test')
-        te = add_temporal(te, label='test')
-        te = compute_vpd(te, label='test')
-        te = apply_weather_regime(te, pca, km, feats, label='test')
-        te.dropna(inplace=True)
-        print(f"  ✔ Test subset ready ({len(te)} rows)")
+            # Test
+            print("  b) Test preprocessing:")
+            te = drop_high_missing(te_raw, 'test')
+            te = fill_precip_zero(te, 'test')
+            te = interpolate_time(te, 'test')
+            te = handle_outliers(te, targets, 'test')
+            te = add_lags(te, targets, 'test')
+            te = add_temporal(te, 'test')
+            te = compute_vpd(te, 'test')
+            te = apply_weather_regime(te, pca, km, feats, 'test')
+            te.dropna(inplace=True)
+            print(f"  ✔ Test subset ready ({len(te)} rows)")
 
-        output[sid] = {'train_df': tr, 'test_df': te}
-        merged.append(pd.concat([tr, te]))
+            output[sid] = {'train_df': tr, 'test_df': te}
+            merged.append(pd.concat([tr, te]))
+
+        print("\nINFO: Saving merged dataset.")
+        full = pd.concat(merged).sort_values('datetime').reset_index(drop=True)
+        full.to_csv('preprocessed_dataset/preprocessed_synop.csv', index=False)
+        print(f"  ✔ Saved merged dataset ({len(full)} rows)")
+        print("\nINFO: Preprocessing complete.")
+        return output
+
+    print("\nINFO: Processing merged dataset.")
+    tr_raw, te_raw = split_train_test(df_raw.copy())
+
+    # Train
+    print("  a) Train preprocessing:")
+    tr = drop_high_missing(tr_raw, 'train')
+    tr = fill_precip_zero(tr, 'train')
+    tr = interpolate_time(tr, 'train')
+    tr = handle_outliers(tr, targets, 'train')
+    tr = add_lags(tr, targets, 'train')
+    tr = add_temporal(tr, 'train')
+    tr = compute_vpd(tr, 'train')
+    pca, km = fit_weather_regime(tr, feats, 'train')
+    tr = apply_weather_regime(tr, pca, km, feats, 'train')
+    tr.dropna(inplace=True)
+    print(f"  ✔ Global train ready ({len(tr)} rows)")
+
+    # Test
+    print("  b) Test preprocessing:")
+    te = drop_high_missing(te_raw, 'test')
+    te = fill_precip_zero(te, 'test')
+    te = interpolate_time(te, 'test')
+    te = handle_outliers(te, targets, 'test')
+    te = add_lags(te, targets, 'test')
+    te = add_temporal(te, 'test')
+    te = compute_vpd(te, 'test')
+    te = apply_weather_regime(te, pca, km, feats, 'test')
+    te.dropna(inplace=True)
+    print(f"  ✔ Global test ready ({len(te)} rows)")
 
     print("\nINFO: Saving merged dataset.")
-    full = pd.concat(merged).sort_values('datetime').reset_index(drop=True)
+    full = pd.concat([tr, te]).sort_values('datetime').reset_index(drop=True)
     full.to_csv('preprocessed_dataset/preprocessed_synop.csv', index=False)
     print(f"  ✔ Saved merged dataset ({len(full)} rows)")
-
     print("\nINFO: Preprocessing complete.")
-    return output if per_station else {
-        'train_df': pd.concat([v['train_df'] for v in output.values()]),
-        'test_df': pd.concat([v['test_df']  for v in output.values()])
-    }
+    return {'train_df': tr, 'test_df': te}
