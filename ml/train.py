@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score
 from sklearn.preprocessing import MinMaxScaler
@@ -14,6 +15,9 @@ def run_training(train_df, test_df, variable, station_id,
                  selected_features):
 
     drop_cols = ['datetime', variable]
+    train_df = train_df.dropna().reset_index(drop=True)
+    test_df = test_df.dropna().reset_index(drop=True)
+    
     X_train = train_df.drop(columns=[c for c in drop_cols if c in train_df.columns])
     X_test = test_df.drop(columns=[c for c in drop_cols if c in test_df.columns])
 
@@ -131,12 +135,24 @@ def train_and_forecast(raw_csv_path, forecast_horizon=6, target_variables=None, 
             for other_var in ['temperature_c', 'humidity', 'wind_speed']:
                 if other_var != var:
                     X = X.drop(columns=[col for col in X.columns if col.startswith(f"{other_var}_lag_") or col.startswith(f"{other_var}_diff_")], errors='ignore')
+            
             y = train_df[[var]].dropna()
             X = X.loc[y.index]
+            X = X.select_dtypes(include=[np.number])
+
+            X = X.dropna(axis=0)
+            y = y.loc[X.index]
 
             selected_features = mutual_info_feature_selection(
                 X, y[var], top_k=20, min_mi=0.01, verbose=True
             )
+
+            station_cols = [col for col in X.columns if col.startswith("station_") and col[8:].isdigit()]
+            if station_cols:
+                print(f"[FORCE INCLUDE] Adding station columns: {station_cols}")
+                selected_features = list(set(selected_features + station_cols))
+
+
 
             run_training(train_df, test_df, var, "merged",
                          horizons, models, scale_needed,
@@ -150,15 +166,19 @@ def train_and_forecast(raw_csv_path, forecast_horizon=6, target_variables=None, 
 
 if __name__ == '__main__':
     forecast_horizon = 6
+    per_station = False
     train_and_forecast(
         raw_csv_path='dataset/synop.csv',
         forecast_horizon=forecast_horizon,
         target_variables=['temperature_c'],
-        per_station=False
+        per_station=per_station
     )
 
-    metrics_df = pd.read_csv("results/per_station/metrics.csv")
-    for var in ['temperature_c']:
-        for h in range(1, forecast_horizon + 1):
-            compare_models_ttest(metrics_df, var, h)
+    results_dir = "results/per_station" if per_station else "results/merged"
+    metrics_df = pd.read_csv(os.path.join(results_dir, "metrics.csv"))
+
+    if per_station:
+        for var in ['temperature_c']:
+            for h in range(1, forecast_horizon + 1):
+                compare_models_ttest(metrics_df, var, h)
 

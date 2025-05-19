@@ -1,19 +1,12 @@
 import os
 import pandas as pd
+from utils import model_abbr
 
-per_station = False  # Set to False for merged data
+per_station = True  # Set to False for merged data
 
 mode = "per_station" if per_station else "merged"
 base_path = os.path.join("results", mode)
 metrics_path = os.path.join(base_path, "metrics.csv")
-
-model_abbr = {
-    "Linear Regression": "LR",
-    "Random Forest": "RF",
-    "Gradient Boosting": "GB",
-    "Neural Network": "NN",
-    "XGBoost": "XGB"
-}
 
 if not os.path.exists(metrics_path):
     print(f"ERROR: File not found: {metrics_path}")

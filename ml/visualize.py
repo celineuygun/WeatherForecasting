@@ -149,4 +149,4 @@ def visualize_predictions(variables=["temperature_c", "humidity", "wind_speed"],
             print(f"[{variable}] Station {station}: MAE vs horizon saved")
 
 if __name__ == "__main__":
-    visualize_predictions(variables=['temperature_c'], per_station=False)
+    visualize_predictions(variables=['temperature_c'], per_station=True)

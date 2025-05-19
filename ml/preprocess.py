@@ -1,196 +1,180 @@
+import os
 import pandas as pd
 import numpy as np
-import os
-from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+from sklearn.cluster import MiniBatchKMeans
 
-def add_input_lags(df, target_col, lags):
-    for lag in lags:
-        df[f"{target_col}_lag_{lag}"] = df[target_col].shift(lag)
-        df[f"{target_col}_diff_{lag}"] = df[target_col] - df[target_col].shift(lag)
-    return df
+LAGS_DEFAULT = [1, 3, 6, 12, 24]
+TRAIN_RATIO = 0.8
+N_WEATHER_CLUSTERS = 4
+MISSING_THRESHOLD = 0.7
 
-def add_temporal_features(df, datetime_col='datetime'):
-    df['hour'] = df[datetime_col].dt.hour
-    month = df[datetime_col].dt.month
-    df['sin_month'] = np.sin(2 * np.pi * month / 12)
-    df['cos_month'] = np.cos(2 * np.pi * month / 12)
-    return df
-
-def add_weather_regime(df, features=None, n_clusters=4):
-    if features is None:
-        features = ['temperature_c', 'sea_level_pressure', 'humidity', 'wind_speed']
-    valid_rows = df[features].dropna()
-    if len(valid_rows) < n_clusters:
-        df['weather_regime'] = np.nan
-        return df
-
-    pca = PCA(n_components=2)
-    reduced = pca.fit_transform(valid_rows)
-    clusters = KMeans(n_clusters=n_clusters, n_init=10, random_state=42).fit_predict(reduced)
-
-    df['weather_regime'] = np.nan
-    df.loc[valid_rows.index, 'weather_regime'] = clusters
-    df['weather_regime'] = df['weather_regime'].astype('category')
-    return df
-
-def enrich_features(df):
-    df['sin_hour'] = np.sin(2 * np.pi * df['hour'] / 24)
-    df['cos_hour'] = np.cos(2 * np.pi * df['hour'] / 24)
-    df.drop(columns=['hour'], inplace=True)
-
-    df['temp_dew_diff'] = df['temperature_c'] - df['dew_point']
-    es = 0.6108 * np.exp(17.27 * df['temperature_c'] / (df['temperature_c'] + 237.3))
-    ea = 0.6108 * np.exp(17.27 * df['dew_point'] / (df['dew_point'] + 237.3))
-    df['svp'] = es
-    df['avp'] = ea
-    df['vpd'] = es - ea
-
-    if 'wind_dir_deg' in df.columns:
-        radians = np.deg2rad(df['wind_dir_deg'])
-        df['sin_wind_dir'] = np.sin(radians)
-        df['cos_wind_dir'] = np.cos(radians)
-        df['wind_dir_deg_lag_1'] = df['wind_dir_deg'].shift(1)
-        df['wind_dir_deg_diff'] = df['wind_dir_deg'] - df['wind_dir_deg_lag_1']
-        if df[['wind_speed', 'wind_dir_deg']].dropna().shape[0] >= 4:
-            idx = df[['wind_speed', 'wind_dir_deg']].dropna().index
-            df.loc[idx, 'wind_cluster'] = KMeans(n_clusters=4, n_init=10, random_state=0).fit_predict(
-                df.loc[idx, ['wind_speed', 'wind_dir_deg']]
-            )
-
-    df['humidity_x_temp'] = df['humidity'] * df['temperature_c']
-    df['wind_x_vpd'] = df['wind_speed'] * df['vpd']
-    if 'press_var_3h' in df.columns:
-        df['wind_x_press3h'] = df['wind_speed'] * df['press_var_3h']
-
-    df = add_weather_regime(df)
-    return df
-
-def handle_outliers(df, column, window=48, label=""):
-    original_len = len(df)
-    rolling_median = df[column].rolling(window=window, center=True).median()
-    mad = (df[column] - rolling_median).abs().rolling(window=window).median()
-    threshold = 4 * mad
-    mask = (df[column] - rolling_median).abs() > threshold
-    num_outliers = mask.sum()
-    percent_outliers = 100 * num_outliers / original_len
-    if num_outliers > 0:
-        print(f"\n[OUTLIER HANDLING] {label} — {column}")
-        print(f"  ➔ {num_outliers} outliers replaced ({percent_outliers:.2f}%)")
-        print(df.loc[mask, [column]].head(3))
-    df.loc[mask, column] = rolling_median[mask]
-    return df
-
-def validate_preprocessing(df, label=""):
-    print(f"\n[VALIDATION] {label}")
-    print(f"  ➔ Date range: {df['datetime'].min()} → {df['datetime'].max()}")
-    print(f"  ➔ Shape: {df.shape}")
-    print(f"  ➔ Columns: {df.columns.tolist()}")
-
-def report_missing(df, name=""):
-    total_missing = df.isna().sum()
-    missing_cols = total_missing[total_missing > 0]
-    if not missing_cols.empty:
-        print(f"\n[MISSING DATA] {name}:")
-        print(missing_cols)
-
-def apply_lags_and_outliers(df, targets, lags, label):
-    df = df.sort_values('datetime').reset_index(drop=True)
-    for t in targets:
-        if t in df.columns:
-            df = handle_outliers(df, t, window=48, label=label)
-            df = add_input_lags(df, t, lags)
-    return df.dropna().reset_index(drop=True)
-
-def preprocess_one(df, targets, lags, label):
-    df = df.sort_values('datetime').reset_index(drop=True)
-    df = df.set_index('datetime')
-
-    missing_ratio = df.isna().mean()
-    to_drop = missing_ratio[missing_ratio > 0.7].index.tolist()
-    if to_drop:
-        print(f"\n[COLUMN DROPPING] {label} — Dropping columns with >70% missing: {to_drop}")
-        df = df.drop(columns=to_drop)
-
-    zero_fill = [col for col in ['precip_1h', 'precip_3h', 'precip_6h', 'precip_12h', 'precip_24h', 'rafale_10min'] if col in df.columns]
-    for col in zero_fill:
-        df[col] = df[col].fillna(0)
-
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    report_missing(df[num_cols], name=label)
-    df[num_cols] = df[num_cols].interpolate(method='time').ffill().bfill()
-    df = df.reset_index()
-
-    df = add_temporal_features(df)
-    df = enrich_features(df)
-    df = df.dropna(subset=[t for t in targets if t in df.columns]).reset_index(drop=True)
-    df = df.reset_index(drop=True)
-
-    validate_preprocessing(df, label)
-    return df
-
-def split_and_return(df, ratio=0.8):
-    idx = int(len(df) * ratio)
-    return {'train_df': df.iloc[:idx].copy(), 'test_df': df.iloc[idx:].copy()}
-
-def preprocess_synop_data(path, lags=[1,3,6,12,24], targets=None, per_station=True):
-    if targets is None:
-        targets = ['temperature_c', 'humidity', 'wind_speed']
-
+def read_and_prepare(path):
+    print("INFO: Loading raw data and renaming columns.")
     df = pd.read_csv(path, sep=';', low_memory=False)
     df['datetime'] = pd.to_datetime(df['Date'], utc=True)
-
     cols = [
-        'ID OMM station','datetime','Pression au niveau mer','Variation de pression en 3 heures',
-        'Variation de pression en 24 heures','Type de tendance barométrique',
-        'Direction du vent moyen 10 mn','Vitesse du vent moyen 10 mn','Température (°C)',
-        'Point de rosée','Humidité','Visibilité horizontale','Nebulosité totale','Pression station',
-        'Latitude','Longitude','Altitude','Rafale sur les 10 dernières minutes','Rafales sur une période',
-        'Précipitations dans la dernière heure','Précipitations dans les 3 dernières heures',
-        'Précipitations dans les 6 dernières heures','Précipitations dans les 12 dernières heures',
+        'ID OMM station', 'datetime', 'Pression au niveau mer',
+        'Variation de pression en 3 heures', 'Variation de pression en 24 heures',
+        'Type de tendance barométrique', 'Direction du vent moyen 10 mn',
+        'Vitesse du vent moyen 10 mn', 'Température (°C)', 'Point de rosée', 'Humidité',
+        'Visibilité horizontale', 'Nebulosité totale', 'Pression station', 'Latitude', 'Longitude',
+        'Altitude', 'Rafale sur les 10 dernières minutes',
+        'Précipitations dans la dernière heure',
+        'Précipitations dans les 3 dernières heures',
+        'Précipitations dans les 6 dernières heures',
+        'Précipitations dans les 12 dernières heures',
         'Précipitations dans les 24 dernières heures'
     ]
     df = df[cols]
+
     df.columns = [
-        'station_id','datetime','sea_level_pressure','press_var_3h','press_var_24h','baro_trend',
-        'wind_dir','wind_speed','temperature_c','dew_point','humidity','visibility','cloud_cover',
-        'station_pressure','latitude','longitude','altitude','rafale_10min','rafales_periode',
-        'precip_1h','precip_3h','precip_6h','precip_12h','precip_24h'
+        'station_id', 'datetime', 'sea_level_pressure', 'press_var_3h', 'press_var_24h',
+        'baro_trend', 'wind_dir', 'wind_speed', 'temperature_c', 'dew_point', 'humidity',
+        'visibility', 'cloud_cover', 'station_pressure', 'latitude', 'longitude', 'altitude',
+        'rafale_10min', 'precip_1h', 'precip_3h', 'precip_6h', 'precip_12h', 'precip_24h'
     ]
-
+    # Convert dew point
     df['dew_point'] = df['dew_point'] - 273.15
-    df['baro_trend'] = df['baro_trend'].fillna(df['baro_trend'].mode().iloc[0])
-    dir_map = {'N':0,'NE':45,'E':90,'SE':135,'S':180,'SW':225,'W':270,'NW':315}
-    df['wind_dir_deg'] = pd.to_numeric(df['wind_dir'], errors='coerce')
-    df.loc[df['wind_dir_deg'].isna(), 'wind_dir_deg'] = df['wind_dir'].map(dir_map)
+    # Fill barometric trend missing values without chained assignment
+    baro_mode = df['baro_trend'].mode().iloc[0]
+    df['baro_trend'] = df['baro_trend'].fillna(baro_mode)
+    df = pd.get_dummies(df, columns=['baro_trend'], prefix='trend')
+    # Map wind direction to degrees
+    dir_map = {'N': 0, 'NE': 45, 'E': 90, 'SE': 135, 'S': 180, 'SW': 225, 'W': 270, 'NW': 315}
+    df['wind_dir_deg'] = pd.to_numeric(df['wind_dir'], errors='coerce').fillna(df['wind_dir'].map(dir_map))
+    print("  ✔ Loaded and renamed columns.")
+    return df
 
-    df['wind_dir_deg'] = pd.to_numeric(df['wind_dir_deg'], errors='coerce')
+def split_train_test(df):
+    print("INFO: Splitting into train and test.")
+    df = df.sort_values('datetime')
+    cutoff = int(len(df) * TRAIN_RATIO)
+    train_df = df.iloc[:cutoff].copy()
+    test_df  = df.iloc[cutoff:].copy()
+    print(f"  ✔ Train: {len(train_df)} rows, Test: {len(test_df)} rows.")
+    return train_df, test_df
 
+def drop_high_missing(df, label=""):
+    to_drop = df.isna().mean().loc[lambda x: x > MISSING_THRESHOLD].index.tolist()
+    if to_drop:
+        print(f"  - [{label}] Dropping {len(to_drop)} cols >{MISSING_THRESHOLD*100:.0f}% missing: {to_drop}")
+        return df.drop(columns=to_drop)
+    return df
+
+def fill_precip_zero(df, label=""):
+    prec_cols = [c for c in ['precip_1h','precip_3h','precip_6h','precip_12h','precip_24h','rafale_10min'] if c in df.columns]
+    df[prec_cols] = df[prec_cols].fillna(0)
+    print(f"  - [{label}] Filled precipitation NaNs in columns: {prec_cols}")
+    return df
+
+def interpolate_time(df, label=""):
+    df = df.set_index('datetime')
+    numcols = [c for c in df.select_dtypes(include=[np.number]).columns if df[c].isna().any()]
+    df[numcols] = df[numcols].interpolate(method='time').ffill().bfill()
+    df = df.reset_index()
+    print(f"  - [{label}] Interpolated columns with NaN: {numcols}")
+    return df
+
+def handle_outliers(df, targets, label=""):
+    for col in targets:
+        med = df[col].rolling(48, center=True).median()
+        mad = (df[col] - med).abs().rolling(48).median()
+        mask = (df[col] - med).abs() > 4 * mad
+        if mask.any():
+            cnt = mask.sum()
+            pct = 100 * cnt / len(df)
+            print(f"  - [{label}] Outliers in {col}: {cnt} pts ({pct:.2f}%) replaced")
+            df.loc[mask, col] = med[mask]
+    return df
+
+def add_lags(df, targets, label=""):
+    for col in targets:
+        for lag in LAGS_DEFAULT:
+            df[f"{col}_lag_{lag}"] = df[col].shift(lag)
+            df[f"{col}_diff_{lag}"] = df[col] - df[col].shift(lag)
+    print(f"  - [{label}] Added lags and diffs for {targets}")
+    return df
+
+def add_temporal(df, label=""):
+    df['sin_hour'] = np.sin(2*np.pi*df['datetime'].dt.hour/24)
+    df['cos_hour'] = np.cos(2*np.pi*df['datetime'].dt.hour/24)
+    df['sin_month'] = np.sin(2*np.pi*df['datetime'].dt.month/12)
+    df['cos_month'] = np.cos(2*np.pi*df['datetime'].dt.month/12)
+    print(f"  - [{label}] Added cyclic time features")
+    return df
+
+def compute_vpd(df, label=""):
+    es = 0.6108 * np.exp(17.27*df['temperature_c']/(df['temperature_c']+237.3))
+    ea = 0.6108 * np.exp(17.27*df['dew_point']/(df['dew_point']+237.3))
+    df['svp'], df['avp'], df['vpd'] = es, ea, es - ea
+    print(f"  - [{label}] Computed VPD metrics")
+    return df
+
+def fit_weather_regime(train_df, feats, label=""):
+    valid = train_df[feats].dropna()
+    pca = PCA(n_components=2, random_state=42).fit(valid)
+    proj = pca.transform(valid)
+    km = MiniBatchKMeans(n_clusters=N_WEATHER_CLUSTERS, random_state=42).fit(proj)
+    train_df.loc[valid.index, 'weather_regime'] = km.predict(proj)
+    print(f"  - [{label}] Fitted weather regime clustering")
+    return pca, km
+
+def apply_weather_regime(df, pca, km, feats, label=""):
+    valid = df[feats].dropna()
+    proj = pca.transform(valid)
+    df.loc[valid.index, 'weather_regime'] = km.predict(proj)
+    print(f"  - [{label}] Applied weather regime clustering")
+    return df
+
+def preprocess_synop_data(path, targets=None, per_station=True):
+    if targets is None:
+        targets = ['temperature_c','humidity','wind_speed']
+
+    df_raw = read_and_prepare(path)
     os.makedirs('preprocessed_dataset', exist_ok=True)
+    output, merged = {}, []
+    feats = targets + ['sea_level_pressure']
 
-    data, all_dfs = {}, []
-    for sid, grp in df.groupby('station_id'):
-        g = grp.copy()
-        g = pd.get_dummies(g, columns=['baro_trend'], prefix='trend')
-        proc = preprocess_one(g, targets, lags, f'station {sid}')
+    print("\nINFO: Processing each station separately.")
+    for sid, grp in df_raw.groupby('station_id'):
+        print(f"\n[Station {sid}]")
+        tr_raw, te_raw = split_train_test(grp.copy())
 
-        splits = split_and_return(proc)
-        train_df = apply_lags_and_outliers(splits['train_df'], targets, lags, f"{sid} (train)")
-        test_df  = apply_lags_and_outliers(splits['test_df'], targets, lags, f"{sid} (test)")
+        print("  a) Train preprocessing:")
+        tr = drop_high_missing(tr_raw, label='train')
+        tr = fill_precip_zero(tr, label='train')
+        tr = interpolate_time(tr, label='train')
+        tr = handle_outliers(tr, targets, label='train')
+        tr = add_lags(tr, targets, label='train')
+        tr = add_temporal(tr, label='train')
+        tr = compute_vpd(tr, label='train')
+        pca, km = fit_weather_regime(tr, feats, label='train')
+        tr = apply_weather_regime(tr, pca, km, feats, label='train')
+        tr.dropna(inplace=True)
+        print(f"  ✔ Train subset ready ({len(tr)} rows)")
 
-        data[sid] = {'train_df': train_df, 'test_df': test_df}
-        all_dfs.append(pd.concat([train_df, test_df]))
+        print("  b) Test preprocessing:")
+        te = drop_high_missing(te_raw, label='test')
+        te = fill_precip_zero(te, label='test')
+        te = interpolate_time(te, label='test')
+        te = add_lags(te, targets, label='test')
+        te = add_temporal(te, label='test')
+        te = compute_vpd(te, label='test')
+        te = apply_weather_regime(te, pca, km, feats, label='test')
+        te.dropna(inplace=True)
+        print(f"  ✔ Test subset ready ({len(te)} rows)")
 
-    full = pd.concat(all_dfs).sort_values("datetime").reset_index(drop=True)
+        output[sid] = {'train_df': tr, 'test_df': te}
+        merged.append(pd.concat([tr, te]))
 
-    if not per_station:
-        full = pd.get_dummies(full, columns=['station_id'], prefix='station')
-        full.drop(columns=['station_id'], inplace=True, errors='ignore')
-
+    print("\nINFO: Saving merged dataset.")
+    full = pd.concat(merged).sort_values('datetime').reset_index(drop=True)
     full.to_csv('preprocessed_dataset/preprocessed_synop.csv', index=False)
+    print(f"  ✔ Saved merged dataset ({len(full)} rows)")
 
-    if per_station:
-        return data
-    else:
-        print("\n[MERGED DATA MODE] Using merged dataset for training.")
-        return split_and_return(full)
+    print("\nINFO: Preprocessing complete.")
+    return output if per_station else {
+        'train_df': pd.concat([v['train_df'] for v in output.values()]),
+        'test_df': pd.concat([v['test_df']  for v in output.values()])
+    }

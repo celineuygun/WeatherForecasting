@@ -3,10 +3,19 @@ import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, explained_variance_score
 from sklearn.feature_selection import mutual_info_regression
 from scipy.stats import ttest_rel
+from itertools import combinations
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, explained_variance_score
+
+model_abbr = {
+    "Linear Regression": "LR",
+    "Random Forest": "RF",
+    "Gradient Boosting": "GB",
+    "Neural Network": "NN",
+    "XGBoost": "XGB"
+}
 
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
@@ -25,27 +34,33 @@ def evaluate(y_true, y_pred):
     return mae, mse, rmse, r2, evs, mape
 
 def compare_models_ttest(metrics_df, variable, horizon):
-    print(f"\n[STAT TEST] Variable: {variable}, Horizon: t+{horizon}")
-    subset = metrics_df[(metrics_df['Variable'] == variable) & (metrics_df['Step'] == horizon)]
-    models = subset['Model'].unique()
+    """
+    Perform paired t-test between each pair of models for a given variable and horizon.
+    Outputs a concise comparison table: one row per metric & model-pair.
+    """
+    subset = metrics_df[
+        (metrics_df['Variable'] == variable) &
+        (metrics_df['Step'] == horizon)
+    ]
+    models = sorted(subset['Model'].unique())
     metrics_to_test = ['MAE', 'RMSE', 'R2 Step']
 
+    print(f"\n{variable} @ t+{horizon}")
+    print(f"{'Metric':<12} {'Models':<12} {'p-val':<6} {'*'}")
+    print('-' * 35)
+
     for metric in metrics_to_test:
-        print(f"\nMetric: {metric}")
-        for i in range(len(models)):
-            for j in range(i + 1, len(models)):
-                model_a = models[i]
-                model_b = models[j]
-
-                scores_a = subset[subset['Model'] == model_a][metric].values
-                scores_b = subset[subset['Model'] == model_b][metric].values
-
-                if len(scores_a) != len(scores_b):
-                    print(f"  ✗ Skipping {model_a} vs {model_b} (unequal sample sizes)")
-                    continue
-
-                t_stat, p_value = ttest_rel(scores_a, scores_b)
-                print(f"  ➤ {model_a} vs {model_b}: t={t_stat:.3f}, p={p_value:.4f} {'(significant)' if p_value < 0.05 else '(not significant)'}")
+        for m1, m2 in combinations(models, 2):
+            a = subset[subset['Model'] == m1][metric].values
+            b = subset[subset['Model'] == m2][metric].values
+            if len(a) != len(b):
+                continue
+            t_stat, p_value = ttest_rel(a, b, nan_policy='omit')
+            signif = '*' if p_value < 0.05 else ''
+            m1_abbr = model_abbr.get(m1, m1)
+            m2_abbr = model_abbr.get(m2, m2)
+            combo = f"{m1_abbr} vs {m2_abbr}"
+            print(f"{metric:<12} {combo:<12} {p_value:<6.3f} {signif}")
 
 def plot_mutual_info(X, y, top_n=30, min_mi=0.0):
     mi = mutual_info_regression(X, y, discrete_features='auto')
