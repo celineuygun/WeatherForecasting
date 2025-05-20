@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, explained_variance_score
 from sklearn.feature_selection import mutual_info_regression
 from scipy.stats import ttest_rel
@@ -62,9 +63,22 @@ def compare_models_ttest(metrics_df, variable, horizon):
             combo = f"{m1_abbr} vs {m2_abbr}"
             print(f"{metric:<12} {combo:<12} {p_value:<6.3f} {signif}")
 
-def plot_mutual_info(X, y, top_n=30, min_mi=0.0):
-    mi = mutual_info_regression(X, y, discrete_features='auto')
+def plot_mutual_info(X, y, top_n=30, min_mi=0.1, per_station=True):
+    """
+    Compute and plot mutual information scores between features X and target y,
+    then save the bar chart automatically under results/per_station or results/merged.
 
+    Args:
+      X: DataFrame of features
+      y: Series of target values (y.name used for filename)
+      top_n: number of top features to display
+      min_mi: minimum mutual information threshold to include
+      per_station: if True, save under results/per_station, else results/merged
+
+    Returns:
+      mi_series: pd.Series of all MI scores
+    """
+    mi = mutual_info_regression(X, y, discrete_features='auto')
     mi_series = pd.Series(mi, index=X.columns)
     mi_series = mi_series.dropna()
     mi_series = mi_series[mi_series.index.notnull()]
@@ -72,18 +86,28 @@ def plot_mutual_info(X, y, top_n=30, min_mi=0.0):
 
     top_features = mi_series[-top_n:]
 
+    base = 'per_station' if per_station else 'merged'
+    save_dir = os.path.join('results', base, 'plots')
+    os.makedirs(save_dir, exist_ok=True)
+
+    sns.set(style="whitegrid")
     plt.figure(figsize=(8, max(4, len(top_features) * 0.3)))
     sns.barplot(x=top_features.values, y=top_features.index, orient='h', color='skyblue')
     plt.xlabel("Mutual Information Score")
-    plt.title(f"Top {len(top_features)} Features by MI with Target")
+    plt.title(f"Top {len(top_features)} Features by MI with {y.name}")
     plt.grid(axis='x', linestyle='--', alpha=0.6)
     plt.tight_layout()
-    plt.show()
+
+    fname = f"mi_{y.name}.png" if y.name else "mutual_info.png"
+    path = os.path.join(save_dir, fname)
+    plt.savefig(path)
+    plt.close()
+    print(f"INFO: Saved mutual info plot to {path}")
 
     return mi_series
 
-def mutual_info_feature_selection(X, y, top_k=None, min_mi=None, verbose=True):
-    # plot_mutual_info(X, y, top_n=top_k, min_mi=min_mi)
+def mutual_info_feature_selection(X, y, top_k=None, min_mi=None, per_station=True, verbose=True):
+    plot_mutual_info(X, y, top_n=top_k, min_mi=min_mi, per_station=per_station)
 
     mi = mutual_info_regression(X, y, discrete_features='auto')
     mi_series = pd.Series(mi, index=X.columns).sort_values(ascending=False)
@@ -97,7 +121,7 @@ def mutual_info_feature_selection(X, y, top_k=None, min_mi=None, verbose=True):
     selected = mi_series.index.tolist()
 
     if verbose:
-        print(f"[MI SELECTION] {len(selected)} features selected (top_k={top_k}, min_mi={min_mi}): {selected}")
+        print(f"\n[MI SELECTION] {len(selected)} features selected (top_k={top_k}, min_mi={min_mi}): {selected}")
 
     return selected
 

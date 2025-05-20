@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.cluster import MiniBatchKMeans
 
-LAGS_DEFAULT = [1, 2, 3, 4, 5, 6, 24]
+LAGS_DEFAULT = [3, 6, 9, 24]
 TRAIN_RATIO = 0.8
 N_WEATHER_CLUSTERS = 4
 MISSING_THRESHOLD = 0.7
@@ -137,7 +137,6 @@ def preprocess_synop_data(path, targets=None, per_station=True):
         targets = ['temperature_c','humidity','wind_speed']
 
     df_raw = read_and_prepare(path)
-    os.makedirs('preprocessed_dataset', exist_ok=True)
     feats = targets + ['sea_level_pressure']
 
     if per_station:
@@ -179,7 +178,7 @@ def preprocess_synop_data(path, targets=None, per_station=True):
 
         print("\nINFO: Saving merged dataset.")
         full = pd.concat(merged).sort_values('datetime').reset_index(drop=True)
-        full.to_csv('preprocessed_dataset/preprocessed_synop.csv', index=False)
+        full.to_csv('dataset/preprocessed_synop.csv', index=False)
         print(f"  ✔ Saved merged dataset ({len(full)} rows)")
         print("\nINFO: Preprocessing complete.")
         return output
@@ -218,7 +217,7 @@ def preprocess_synop_data(path, targets=None, per_station=True):
 
     print("\nINFO: Saving merged dataset.")
     full = pd.concat([tr, te]).sort_values('datetime').reset_index(drop=True)
-    full.to_csv('preprocessed_dataset/preprocessed_synop.csv', index=False)
+    full.to_csv('dataset/preprocessed_synop.csv', index=False)
     print(f"  ✔ Saved merged dataset ({len(full)} rows)")
     print("\nINFO: Preprocessing complete.")
     return {'train_df': tr, 'test_df': te}

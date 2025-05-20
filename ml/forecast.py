@@ -5,11 +5,21 @@ import cartopy.feature as cfeature
 import os
 
 csv_path = "results/per_station/predictions_temperature_c.csv"
-target_datetime = pd.to_datetime("2025-04-08 18:00:00+00:00")
+target_datetime = pd.to_datetime("2025-04-08 12:00:00+00:00")
 
 stations = {
-    "7761": {"name": "Ajaccio", "lat": 41.918, "lon": 8.792667, "alt": 5},
-    "7790": {"name": "Bastia",  "lat": 42.6975, "lon": 9.4500,   "alt": 10}
+    "7761": {
+        "name": "Ajaccio",
+        "lat": 41.918,
+        "lon": 8.792667,
+        "alt": 5
+    },
+    "7790": {
+        "name": "Bastia",
+        "lat": 42.540667,
+        "lon": 9.485167,
+        "alt": 10
+    }
 }
 
 df = pd.read_csv(csv_path)
@@ -39,6 +49,7 @@ for step in steps:
     for sid, info in stations.items():
         lat, lon = info["lat"], info["lon"]
         station_name = info["name"]
+        alt = info["alt"]
 
         ax.plot(lon, lat, marker='o', color='black', markersize=6, transform=crs.PlateCarree())
 

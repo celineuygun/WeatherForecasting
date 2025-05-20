@@ -15,7 +15,6 @@ def run_training(train_df, test_df, variable, station_id,
                  all_metrics, all_predictions,
                  selected_features):
 
-    # drop timestamp & target
     drop_cols = ['datetime', variable]
     train_df = train_df.dropna().reset_index(drop=True)
     test_df  = test_df.dropna().reset_index(drop=True)
@@ -23,18 +22,15 @@ def run_training(train_df, test_df, variable, station_id,
     X_train = train_df.drop(columns=[c for c in drop_cols if c in train_df.columns])
     X_test  = test_df .drop(columns=[c for c in drop_cols if c in test_df.columns])
 
-    # remove other-variable lags/diffs
     for other in ['temperature_c','humidity','wind_speed']:
         if other != variable:
             bad = [c for c in X_train.columns if c.startswith(other + '_lag_') or c.startswith(other + '_diff_')]
             X_train.drop(columns=bad, errors='ignore', inplace=True)
             X_test .drop(columns=bad, errors='ignore', inplace=True)
 
-    # build multioutput targets for only the specified horizons
     y_train_multi, y_train_raw = prepare_target_shifted(train_df[[variable]], variable, horizons)
     y_test_raw,  _            = prepare_target_shifted(test_df [[variable]], variable, horizons)
 
-    # align features
     X_train = X_train.iloc[:len(y_train_multi)][selected_features].reset_index(drop=True)
     X_test  = X_test .iloc[:len(y_test_raw)][selected_features].reset_index(drop=True)
 
@@ -52,19 +48,16 @@ def run_training(train_df, test_df, variable, station_id,
         reg = MultiOutputRegressor(base)
         reg.fit(Xtr, y_train_multi)
 
-        # save model
         outdir = os.path.join('models', variable)
         os.makedirs(outdir, exist_ok=True)
         joblib.dump(reg, f"{outdir}/{name}_{variable}_{station_id}.pkl")
 
-        # predict
         Yp = reg.predict(Xte)
         Yt = reg.predict(Xtr)
 
         overall_r2 = r2_score(y_test_raw.values, Yp)
         train_r2   = r2_score(y_train_raw.values, Yt)
 
-        # record metrics & predictions
         for i, h in enumerate(horizons):
             y_true = y_test_raw.iloc[:,i].values
             y_pred = Yp[:,i]
@@ -84,16 +77,15 @@ def run_training(train_df, test_df, variable, station_id,
                     'Step':h,'Datetime':dt_i,'True':t,'Predicted':p
                 })
 
-
 def train_and_forecast(raw_csv_path, target_variables=None, per_station=True):
-    horizons = [0, 3, 6]
+    horizons = [3, 6, 9]
     scale_needed = {'Linear Regression','Neural Network'}
 
     station_data = preprocess_synop_data(raw_csv_path,
-                                        targets=target_variables,
-                                        per_station=per_station)
-    models      = get_models()
-    all_metrics    = []
+                                         targets=target_variables,
+                                         per_station=per_station)
+    models = get_models()
+    all_metrics = []
 
     outdir = f"results/{'per_station' if per_station else 'merged'}"
     os.makedirs(outdir, exist_ok=True)
@@ -104,21 +96,31 @@ def train_and_forecast(raw_csv_path, target_variables=None, per_station=True):
 
         if per_station:
             train_list = []
-            for sid, D in station_data.items():
-                df = D['train_df'].copy(); df['station_id']=sid
-                train_list.append(df)
-            merged_train = pd.concat(train_list,ignore_index=True)
+            valid_features_by_station = {}
 
-            X_all = merged_train.drop(columns=['datetime',var],errors='ignore')
-            for other in ['temperature_c','humidity','wind_speed']:
-                if other!=var:
-                    bad = [c for c in X_all if c.startswith(other+'_lag_') or c.startswith(other+'_diff_')]
-                    X_all.drop(columns=bad,errors='ignore',inplace=True)
+            for sid, D in station_data.items():
+                df = D['train_df'].copy(); df['station_id'] = sid
+                train_list.append(df)
+
+                train_cols = set(D['train_df'].drop(columns=['datetime', var], errors='ignore').columns)
+                test_cols  = set(D['test_df'].drop(columns=['datetime', var], errors='ignore').columns)
+                shared_cols = train_cols & test_cols
+
+                for other in ['temperature_c', 'humidity', 'wind_speed']:
+                    if other != var:
+                        shared_cols = {c for c in shared_cols if not c.startswith(other + '_lag_') and not c.startswith(other + '_diff_')}
+
+                valid_features_by_station[sid] = shared_cols
+
+            common_features = set.intersection(*valid_features_by_station.values())
+            merged_train = pd.concat(train_list, ignore_index=True)
+
+            X_all = merged_train[list(common_features)].copy()
             y_all = merged_train[[var]].dropna()
             X_all = X_all.loc[y_all.index]
 
             selected = mutual_info_feature_selection(
-                X_all, y_all[var], top_k=20, min_mi=0.01, verbose=True
+                X_all, y_all[var], top_k=20, min_mi=0.01, per_station=True, verbose=True
             )
 
             for sid, D in station_data.items():
@@ -133,23 +135,23 @@ def train_and_forecast(raw_csv_path, target_variables=None, per_station=True):
             print("[Global]")
             tr, te = D['train_df'], D['test_df']
 
-            X = tr.drop(columns=['datetime',var],errors='ignore')
-            for other in ['temperature_c','humidity','wind_speed']:
-                if other!=var:
-                    bad = [c for c in X if c.startswith(other+'_lag_') or c.startswith(other+'_diff_')]
-                    X.drop(columns=bad,errors='ignore',inplace=True)
+            X = tr.drop(columns=['datetime', var], errors='ignore')
+            for other in ['temperature_c', 'humidity', 'wind_speed']:
+                if other != var:
+                    bad = [c for c in X if c.startswith(other + '_lag_') or c.startswith(other + '_diff_')]
+                    X.drop(columns=bad, errors='ignore', inplace=True)
 
             y = tr[[var]].dropna()
             X = X.loc[y.index].select_dtypes(include=[np.number]).dropna()
             y = y.loc[X.index]
 
             selected = mutual_info_feature_selection(
-                X, y[var], top_k=20, min_mi=0.01, verbose=True
+                X, y[var], top_k=20, min_mi=0.01, per_station=per_station, verbose=True
             )
 
             station_cols = [col for col in X.columns if col.startswith("station_") and col[8:].isdigit()]
             if station_cols:
-                print("[INCLUDE]",station_cols)
+                print("[INCLUDE]", station_cols)
                 selected += station_cols
 
             run_training(tr, te, var, 'merged',
@@ -162,7 +164,7 @@ def train_and_forecast(raw_csv_path, target_variables=None, per_station=True):
     pd.DataFrame(all_metrics).to_csv(f"{outdir}/metrics.csv", index=False)
     print("\nINFO: Training and forecasting completed.")
 
-if __name__=='__main__':
+if __name__ == '__main__':
     train_and_forecast('dataset/synop.csv',
                        target_variables=['temperature_c'],
                        per_station=True)

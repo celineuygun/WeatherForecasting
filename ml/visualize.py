@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 def visualize_predictions(
     variables=["temperature_c", "humidity", "wind_speed"],
     per_station=True,
-    allowed_steps=[3, 6]
+    allowed_steps=[3, 6, 9]
 ):
     base_dir = "results/per_station" if per_station else "results/merged"
 

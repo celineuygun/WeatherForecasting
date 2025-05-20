@@ -2,13 +2,11 @@ WRF/
 WPS/
 WPS/WPS_GEOG/
 
-gfs_dataset/
-dataset/
-preprocessed_dataset/
-wrf_output/
+ml/dataset/
 ml/models
+gfs_dataset/
+wrf_output/
 Vtable
-
 
 __pycache__/
 *.py[cod]

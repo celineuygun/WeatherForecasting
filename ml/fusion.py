@@ -100,12 +100,12 @@ def run_fusion_analysis(variables=['temperature_c', 'humidity', 'wind_speed']):
         for station in stations:
             df_station = df[df['Station'] == station].copy()
 
-            print(f"\n=== Fusion Results for: {variable} | Station: {station} ===")
+            print(f"\n[Station {station}] Fusion Results for {variable}")
             for step in steps:
                 print(f"\n  ➤ Step: t+{step}")
-                print("  -------------------------------------------")
+                print("  --------------------------------------------------")
                 print("  Method       |     MAE |    RMSE |     R2 |   MAPE")
-                print("  -------------------------------------------")
+                print("  --------------------------------------------------")
                 for method in fusion_methods:
                     try:
                         mae, mse, rmse, r2, evs, mape = model_fusion(df_station, method, step)
@@ -127,7 +127,7 @@ def run_fusion_analysis(variables=['temperature_c', 'humidity', 'wind_speed']):
 
     df_metrics = pd.DataFrame(all_metrics)
     df_metrics.to_csv(os.path.join(results_dir, "fusion_metrics.csv"), index=False)
-    print("\nFusion evaluation complete. Metrics saved to fusion_metrics.csv.")
+    print("\nINFO: Fusion evaluation complete. Metrics saved to fusion_metrics.csv.")
 
 if __name__ == "__main__":
     run_fusion_analysis(variables=['temperature_c'])
