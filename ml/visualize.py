@@ -10,7 +10,11 @@ import warnings
 sns.set(style="whitegrid")
 warnings.filterwarnings("ignore", category=UserWarning)
 
-def visualize_predictions(variables=["temperature_c", "humidity", "wind_speed"], per_station=True):
+def visualize_predictions(
+    variables=["temperature_c", "humidity", "wind_speed"],
+    per_station=True,
+    allowed_steps=[3, 6]
+):
     base_dir = "results/per_station" if per_station else "results/merged"
 
     for variable in variables:
@@ -21,127 +25,128 @@ def visualize_predictions(variables=["temperature_c", "humidity", "wind_speed"],
 
         print(f"\nINFO: Visualizing: {predictions_file}")
         preds_df = pd.read_csv(predictions_file)
-
         if "Station" not in preds_df.columns:
             preds_df["Station"] = "merged"
+
+        preds_df = preds_df[preds_df["Step"].isin(allowed_steps)]
 
         plot_base_dir = Path(base_dir) / "plots" / variable
         plot_base_dir.mkdir(parents=True, exist_ok=True)
 
-        stations = preds_df['Station'].unique()
-        models = preds_df['Model'].unique()
-        steps = sorted(preds_df['Step'].unique())
+        stations = preds_df["Station"].unique()
+        models   = preds_df["Model"].unique()
+        steps    = allowed_steps
 
         global_density_max = 0
         for station in stations:
-            df_station = preds_df[preds_df['Station'] == station]
             for model in models:
                 for step in steps:
-                    subset = df_station[
-                        (df_station['Model'] == model) &
-                        (df_station['Step'] == step)
+                    subset = preds_df[
+                        (preds_df["Station"] == station) &
+                        (preds_df["Model"]   == model)   &
+                        (preds_df["Step"]    == step)
                     ]
                     if subset.empty:
                         continue
-                    hist = sns.histplot(subset["Predicted"] - subset["True"], bins=30, stat="density", kde=True)
-                    lines = hist.get_lines()
+                    h = sns.histplot(
+                        subset["Predicted"] - subset["True"],
+                        bins=30, stat="density", kde=True
+                    )
+                    lines = h.get_lines()
                     if lines:
-                        y_data = lines[0].get_data()[1]
-                        max_density = np.nanmax(y_data)
-                        global_density_max = max(global_density_max, max_density)
+                        y = lines[0].get_data()[1]
+                        global_density_max = max(global_density_max, np.nanmax(y))
                     plt.clf()
 
         for station in stations:
             station_dir = plot_base_dir / f"station_{station}"
             station_dir.mkdir(exist_ok=True)
 
-            df_station = preds_df[preds_df['Station'] == station].copy()
-            df_station["residual"] = df_station["Predicted"] - df_station["True"]
+            df_st = preds_df[preds_df["Station"] == station].copy()
+            df_st["residual"] = df_st["Predicted"] - df_st["True"]
 
-            val_min = df_station[["True", "Predicted"]].min().min()
-            val_max = df_station[["True", "Predicted"]].max().max()
-            residual_min = df_station["residual"].min()
-            residual_max = df_station["residual"].max()
+            val_min = df_st[["True","Predicted"]].min().min()
+            val_max = df_st[["True","Predicted"]].max().max()
+            res_min = df_st["residual"].min()
+            res_max = df_st["residual"].max()
 
             for model in models:
                 model_dir = station_dir / model.replace(" ", "_")
                 model_dir.mkdir(exist_ok=True)
 
                 for step in steps:
-                    subset = df_station[
-                        (df_station['Model'] == model) &
-                        (df_station['Step'] == step)
+                    subset = df_st[
+                        (df_st["Model"] == model) &
+                        (df_st["Step"]  == step)
                     ].reset_index(drop=True)
-
                     if subset.empty:
                         continue
 
-                    rolling_mae = np.abs(subset["residual"]).rolling(window=100, min_periods=1).mean()
+                    # rolling MAE
+                    rolling_mae = np.abs(subset["residual"])\
+                                   .rolling(window=100, min_periods=1).mean()
                     mae_max = rolling_mae.max()
 
                     fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-                    fig.suptitle(f"{variable} | Station {station} - {model} (t+{step})", fontsize=14)
+                    fig.suptitle(f"{variable} | Station {station} – {model} (t+{step})", fontsize=14)
 
-                    # 1. Prediction vs True
-                    axs[0, 0].plot(subset['True'].values, label='True', alpha=0.7)
-                    axs[0, 0].plot(subset['Predicted'].values, label='Predicted', alpha=0.7)
-                    axs[0, 0].set_ylabel(variable)
-                    axs[0, 0].legend()
-                    axs[0, 0].set_title("Prediction vs. True")
+                    # 1) True vs Pred
+                    axs[0,0].plot(subset["True"], label="True", alpha=0.7)
+                    axs[0,0].plot(subset["Predicted"], label="Pred", alpha=0.7)
+                    axs[0,0].legend(); axs[0,0].set_title("True vs Pred")
+                    axs[0,0].set_ylabel(variable)
 
-                    # 2. Rolling MAE
-                    axs[0, 1].plot(rolling_mae)
-                    axs[0, 1].set_ylim(0, mae_max * 1.1)
-                    axs[0, 1].set_title("Rolling MAE (window=100)")
-                    axs[0, 1].set_ylabel("MAE")
+                    # 2) Rolling MAE
+                    axs[0,1].plot(rolling_mae)
+                    axs[0,1].set_ylim(0, mae_max*1.1)
+                    axs[0,1].set_title("Rolling MAE (win=100)")
 
-                    # 3. Residual Histogram (fixed y-axis)
-                    sns.histplot(subset["residual"], bins=30, kde=True, ax=axs[1, 0], color="salmon", stat="density")
-                    axs[1, 0].set_xlim(residual_min, residual_max)
-                    axs[1, 0].set_ylim(0, global_density_max * 1.1)
-                    axs[1, 0].set_xlabel("Predicted - True")
-                    axs[1, 0].set_title("Residuals Histogram")
+                    # 3) Residual histogram
+                    sns.histplot(
+                        subset["residual"], bins=30, stat="density", kde=True,
+                        ax=axs[1,0], color="salmon"
+                    )
+                    axs[1,0].set_xlim(res_min, res_max)
+                    axs[1,0].set_ylim(0, global_density_max*1.1)
+                    axs[1,0].set_title("Residuals")
 
-                    # 4. True vs Predicted Scatter
-                    r_val = r2_score(subset['True'], subset['Predicted']) if len(subset) > 1 else 0
-                    sns.scatterplot(x="True", y="Predicted", data=subset, alpha=0.3, ax=axs[1, 1], color="crimson")
-                    axs[1, 1].plot([val_min, val_max], [val_min, val_max], linestyle="--", color="black")
-                    axs[1, 1].set_xlim(val_min, val_max)
-                    axs[1, 1].set_ylim(val_min, val_max)
-                    axs[1, 1].text(val_min + 1, val_max - 5, f"R² = {r_val:.2f}", fontsize=10)
-                    axs[1, 1].set_title("True vs Predicted Scatter")
-                    axs[1, 1].set_xlabel("True")
-                    axs[1, 1].set_ylabel("Predicted")
+                    # 4) Scatter True vs Pred
+                    r2 = r2_score(subset["True"], subset["Predicted"])
+                    sns.scatterplot(
+                        x="True", y="Predicted", data=subset,
+                        alpha=0.3, ax=axs[1,1], color="crimson"
+                    )
+                    axs[1,1].plot([val_min, val_max],[val_min, val_max], "--", color="black")
+                    axs[1,1].set_xlim(val_min, val_max)
+                    axs[1,1].set_ylim(val_min, val_max)
+                    axs[1,1].text(val_min, val_max, f"R²={r2:.2f}", fontsize=10)
+                    axs[1,1].set_title("Scatter")
 
-                    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-                    plot_filename = model_dir / f"{model.replace(' ', '_')}_station_{station}_h{step}.png"
-                    fig.savefig(plot_filename)
+                    plt.tight_layout(rect=[0,0.03,1,0.95])
+                    fn = model_dir / f"{model.replace(' ','_')}_h{step}.png"
+                    fig.savefig(fn)
                     plt.close(fig)
 
                 print(f"[{variable}] Station {station}: Plots saved for {model}")
 
-            # MAE vs Forecast Horizon
-            fig, ax = plt.subplots(figsize=(10, 5))
+            # MAE vs Horizon
+            fig, ax = plt.subplots(figsize=(8,4))
             for model in models:
                 maes = []
                 for step in steps:
-                    subset = df_station[
-                        (df_station['Model'] == model) &
-                        (df_station['Step'] == step)
+                    sub = df_st[
+                        (df_st["Model"] == model) &
+                        (df_st["Step"]  == step)
                     ]
-                    if subset.empty:
-                        maes.append(np.nan)
-                        continue
-                    mae = np.mean(np.abs(subset["True"] - subset["Predicted"]))
-                    maes.append(mae)
+                    maes.append(sub["True"].subtract(sub["Predicted"]).abs().mean()
+                               if not sub.empty else np.nan)
+                ax.plot(steps, maes, marker="o", label=model)
 
-                ax.plot(steps, maes, marker='o', label=model)
-
-            ax.set_title(f"{variable} | Station {station} - MAE vs Forecast Horizon")
-            ax.set_xlabel("Forecast Horizon (step)")
-            ax.set_ylabel("Mean Absolute Error")
+            ax.set_title(f"{variable} | Station {station} – MAE vs Horizon")
+            ax.set_xlabel("Forecast Horizon (hours ahead)")
+            ax.set_ylabel("MAE")
+            ax.set_xticks(steps)
             ax.legend()
-            ax.grid(True)
             plt.tight_layout()
             fig.savefig(station_dir / f"mae_vs_horizon_station_{station}.png")
             plt.close(fig)
@@ -149,4 +154,4 @@ def visualize_predictions(variables=["temperature_c", "humidity", "wind_speed"],
             print(f"[{variable}] Station {station}: MAE vs horizon saved")
 
 if __name__ == "__main__":
-    visualize_predictions(variables=['temperature_c'], per_station=False)
+    visualize_predictions(variables=["temperature_c"], per_station=True)

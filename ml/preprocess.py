@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.cluster import MiniBatchKMeans
 
-LAGS_DEFAULT = [1, 3, 6, 12, 24]
+LAGS_DEFAULT = [1, 2, 3, 4, 5, 6, 24]
 TRAIN_RATIO = 0.8
 N_WEATHER_CLUSTERS = 4
 MISSING_THRESHOLD = 0.7
@@ -39,10 +39,8 @@ def read_and_prepare(path):
     # Fill barometric trend missing values without chained assignment
     baro_mode = df['baro_trend'].mode().iloc[0]
     df['baro_trend'] = df['baro_trend'].fillna(baro_mode)
-    df = pd.get_dummies(df, columns=['baro_trend'], prefix='trend')
-    # Map wind direction to degrees
-    dir_map = {'N': 0, 'NE': 45, 'E': 90, 'SE': 135, 'S': 180, 'SW': 225, 'W': 270, 'NW': 315}
-    df['wind_dir_deg'] = pd.to_numeric(df['wind_dir'], errors='coerce').fillna(df['wind_dir'].map(dir_map))
+    df = pd.get_dummies(df, columns=['baro_trend'], prefix='trend', dtype=int)
+
     print("  ✔ Loaded and renamed columns.")
     return df
 
@@ -150,7 +148,7 @@ def preprocess_synop_data(path, targets=None, per_station=True):
             tr_raw, te_raw = split_train_test(grp.copy())
 
             # Train
-            print("  a) Train preprocessing:")
+            print("\n  a) Train preprocessing:")
             tr = drop_high_missing(tr_raw, 'train')
             tr = fill_precip_zero(tr, 'train')
             tr = interpolate_time(tr, 'train')
@@ -164,7 +162,7 @@ def preprocess_synop_data(path, targets=None, per_station=True):
             print(f"  ✔ Train subset ready ({len(tr)} rows)")
 
             # Test
-            print("  b) Test preprocessing:")
+            print("\n  b) Test preprocessing:")
             te = drop_high_missing(te_raw, 'test')
             te = fill_precip_zero(te, 'test')
             te = interpolate_time(te, 'test')
@@ -190,7 +188,7 @@ def preprocess_synop_data(path, targets=None, per_station=True):
     tr_raw, te_raw = split_train_test(df_raw.copy())
 
     # Train
-    print("  a) Train preprocessing:")
+    print("\n  a) Train preprocessing:")
     tr = drop_high_missing(tr_raw, 'train')
     tr = fill_precip_zero(tr, 'train')
     tr = interpolate_time(tr, 'train')
@@ -201,10 +199,11 @@ def preprocess_synop_data(path, targets=None, per_station=True):
     pca, km = fit_weather_regime(tr, feats, 'train')
     tr = apply_weather_regime(tr, pca, km, feats, 'train')
     tr.dropna(inplace=True)
+    tr = pd.get_dummies(tr, columns=['station_id'], prefix='station', dtype=int)
     print(f"  ✔ Global train ready ({len(tr)} rows)")
 
     # Test
-    print("  b) Test preprocessing:")
+    print("\n  b) Test preprocessing:")
     te = drop_high_missing(te_raw, 'test')
     te = fill_precip_zero(te, 'test')
     te = interpolate_time(te, 'test')
@@ -214,6 +213,7 @@ def preprocess_synop_data(path, targets=None, per_station=True):
     te = compute_vpd(te, 'test')
     te = apply_weather_regime(te, pca, km, feats, 'test')
     te.dropna(inplace=True)
+    te = pd.get_dummies(te, columns=['station_id'], prefix='station', dtype=int)
     print(f"  ✔ Global test ready ({len(te)} rows)")
 
     print("\nINFO: Saving merged dataset.")

@@ -1,3 +1,4 @@
+import numpy as np
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 from wrf import getvar, to_np, latlon_coords, smooth2d
@@ -69,7 +70,7 @@ def setup_map(ax):
 
 def plot_t2(nc, lats, lons):
     """
-    Plot 2-meter temperature field from a WRF NetCDF file.
+    Plot 2-meter temperature field from a WRF NetCDF file with Ajaccio and Bastia stations marked and labeled with temperatures and altitude.
 
     Parameters:
         nc (Dataset): NetCDF dataset.
@@ -79,15 +80,49 @@ def plot_t2(nc, lats, lons):
     Saves:
         PNG file in the 'plots' directory.
     """
-    t2 = getvar(nc, "T2", timeidx=0) - 273.15
+    t2 = getvar(nc, "T2", timeidx=0) - 273.15  # Kelvin to Celsius
     fig = plt.figure(figsize=(10, 6))
     ax = plt.axes(projection=crs.PlateCarree())
     setup_map(ax)
+
     c = ax.contourf(to_np(lons), to_np(lats), to_np(t2), 20, transform=crs.PlateCarree(), cmap="RdBu_r")
     plt.colorbar(c, orientation="horizontal", pad=0.05, label="2m Temperature (°C)")
+
+    stations = {
+        "Ajaccio": {
+            "lat": 41.918,
+            "lon": 8.792667,
+            "alt": 5
+        },
+        "Bastia": {
+            "lat": 42.540667,
+            "lon": 9.485167,
+            "alt": 10
+        }
+    }
+
+    lat_vals = to_np(lats)
+    lon_vals = to_np(lons)
+    t2_vals = to_np(t2)
+
+    for name, info in stations.items():
+        lat_s, lon_s, alt = info["lat"], info["lon"], info["alt"]
+
+        dist_sq = (lat_vals - lat_s) ** 2 + (lon_vals - lon_s) ** 2
+        iy, ix = np.unravel_index(np.argmin(dist_sq), dist_sq.shape)
+        temp_val = t2_vals[iy, ix]
+
+        ax.plot(lon_s, lat_s, marker='o', color='black', markersize=6, transform=crs.PlateCarree())
+        ax.text(lon_s + 0.05, lat_s + 0.05,
+                f"{name}\n{temp_val:.1f}°C\n{alt} m",
+                transform=crs.PlateCarree(),
+                fontsize=9, weight='bold',
+                bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
+
     plt.title(f"2-Meter Temperature (°C)\n{timestamp_label}")
     fig.savefig(f"{plot_dir}/t2_{selected_domain}_{filename_time}.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
+
 
 def plot_wind(nc, lats, lons):
     """

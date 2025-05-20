@@ -6,9 +6,9 @@ from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
 from utils import mean_absolute_percentage_error, evaluate
 
-def model_fusion(df, method, variable, step):
+def model_fusion(df, method, step):
     df_step = df[df['Step'] == step].copy()
-    df_step['InstanceID'] = df_step.groupby(['Station', 'Model', 'Step']).cumcount()
+    df_step['InstanceID'] = df_step.groupby(['Model', 'Step']).cumcount()
 
     pivot = df_step.pivot_table(index='InstanceID', columns='Model', values='Predicted', aggfunc='mean')
     true_vals = df_step[['InstanceID', 'True']].drop_duplicates(subset='InstanceID').set_index('InstanceID')['True']
@@ -94,32 +94,36 @@ def run_fusion_analysis(variables=['temperature_c', 'humidity', 'wind_speed']):
             continue
 
         df = pd.read_csv(pred_file)
-        df['InstanceID'] = df.groupby(['Station', 'Model', 'Step']).cumcount()
+        stations = df['Station'].unique()
         steps = sorted(df['Step'].unique())
 
-        print(f"\n=== Fusion Results for: {variable} ===")
-        for step in steps:
-            print(f"\n  ➤ Step: t+{step}")
-            print("  -------------------------------------------")
-            print("  Method       |     MAE |    RMSE |     R2 |   MAPE")
-            print("  -------------------------------------------")
-            for method in fusion_methods:
-                try:
-                    mae, mse, rmse, r2, evs, mape = model_fusion(df, method, variable, step)
-                    print(f"  {method:<12} | {mae:7.2f} | {rmse:7.2f} | {r2:6.2f} | {mape:6.2f}")
-                    all_metrics.append({
-                        'Variable': variable,
-                        'Step': step,
-                        'Fusion Method': method,
-                        'MAE': mae,
-                        'MSE': mse,
-                        'RMSE': rmse,
-                        'R2': r2,
-                        'EVS': evs,
-                        'MAPE': mape
-                    })
-                except Exception as e:
-                    print(f"  {method:<12} | ERROR: {str(e)}")
+        for station in stations:
+            df_station = df[df['Station'] == station].copy()
+
+            print(f"\n=== Fusion Results for: {variable} | Station: {station} ===")
+            for step in steps:
+                print(f"\n  ➤ Step: t+{step}")
+                print("  -------------------------------------------")
+                print("  Method       |     MAE |    RMSE |     R2 |   MAPE")
+                print("  -------------------------------------------")
+                for method in fusion_methods:
+                    try:
+                        mae, mse, rmse, r2, evs, mape = model_fusion(df_station, method, step)
+                        print(f"  {method:<12} | {mae:7.2f} | {rmse:7.2f} | {r2:6.2f} | {mape:6.2f}")
+                        all_metrics.append({
+                            'Variable': variable,
+                            'Station': station,
+                            'Step': step,
+                            'Fusion Method': method,
+                            'MAE': mae,
+                            'MSE': mse,
+                            'RMSE': rmse,
+                            'R2': r2,
+                            'EVS': evs,
+                            'MAPE': mape
+                        })
+                    except Exception as e:
+                        print(f"  {method:<12} | ERROR: {str(e)}")
 
     df_metrics = pd.DataFrame(all_metrics)
     df_metrics.to_csv(os.path.join(results_dir, "fusion_metrics.csv"), index=False)
