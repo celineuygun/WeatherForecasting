@@ -59,23 +59,47 @@ def run_training(train_df, test_df, variable, station_id,
         train_r2   = r2_score(y_train_raw.values, Yt)
 
         for i, h in enumerate(horizons):
-            y_true = y_test_raw.iloc[:,i].values
-            y_pred = Yp[:,i]
-            idx    = y_test_raw.index
-            dt     = test_df.loc[idx, 'datetime'] + pd.to_timedelta(h, unit='h')
+            y_true = y_test_raw.iloc[:, i].values
+            y_pred = Yp[:, i]
+            datetimes = test_df.loc[y_test_raw.index, 'datetime'].reset_index(drop=True)
+            future_times = datetimes + pd.to_timedelta(h, unit='h')
 
             mae, mse, rmse, r2_step, evs, mape = evaluate(y_true, y_pred)
             all_metrics.append({
-                'Variable':variable,'Station':station_id,'Model':name,
-                'Step':h,'Train R2':train_r2,'Test R2':overall_r2,
-                'MAE':mae,'MSE':mse,'RMSE':rmse,'R2 Step':r2_step,
-                'EVS':evs,'MAPE':mape
+                'Variable': variable, 'Station': station_id, 'Model': name,
+                'Step': h, 'Train R2': train_r2, 'Test R2': overall_r2,
+                'MAE': mae, 'MSE': mse, 'RMSE': rmse, 'R2 Step': r2_step,
+                'EVS': evs, 'MAPE': mape
             })
-            for dt_i, t, p in zip(dt, y_true, y_pred):
-                all_predictions.append({
-                    'Variable':variable,'Station':station_id,'Model':name,
-                    'Step':h,'Datetime':dt_i,'True':t,'Predicted':p
+
+            if station_id == 'merged':
+                df_temp = pd.DataFrame({
+                    'Datetime': future_times,
+                    'Step': [h] * len(y_true),
+                    'True': y_true,
+                    'Predicted': y_pred
                 })
+
+                grouped = df_temp.groupby(['Datetime', 'Step']).agg({'True': 'mean', 'Predicted': 'mean'}).reset_index()
+
+
+                for _, row in grouped.iterrows():
+                    all_predictions.append({
+                        'Variable': variable,
+                        'Station': 'merged',
+                        'Model': name,
+                        'Step': row['Step'],
+                        'Datetime': row['Datetime'],
+                        'True': row['True'],
+                        'Predicted': row['Predicted']
+                    })
+
+            else:
+                for dt_i, t, p in zip(future_times, y_true, y_pred):
+                    all_predictions.append({
+                        'Variable': variable, 'Station': station_id, 'Model': name,
+                        'Step': h, 'Datetime': dt_i, 'True': t, 'Predicted': p
+                    })
 
 def train_and_forecast(raw_csv_path, target_variables=None, per_station=True):
     horizons = [3, 6, 9]
@@ -167,4 +191,4 @@ def train_and_forecast(raw_csv_path, target_variables=None, per_station=True):
 if __name__ == '__main__':
     train_and_forecast('dataset/synop.csv',
                        target_variables=['temperature_c'],
-                       per_station=True)
+                       per_station=False)
