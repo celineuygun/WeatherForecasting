@@ -19,7 +19,6 @@ WeatherForecasting/
 ├── corsica_forecast.py     # Main script to run WRF workflow
 ├── environment.yml         # Conda environment definition
 ├── utils.py                # Automation core functions
-├── validate.py             # SYNOP data comparison script
 └── visualize.py            # Forecast map generation
 ```
 
@@ -89,26 +88,3 @@ geog_data_path = "/path/to/WPS_GEOG"
 cd ..
 ln -sf ungrib/Variable_Tables/Vtable.GFS Vtable
 ```
-
-## Running Forecast
-```bash
-python corsica_forecast.py
-```
-
-## Visualization
-```bash
-python visualize.py
-```
-
-## Validation
-```bash
-python validate.py
-```
-
-## Machine Learning
-Inside the `ml/` folder, train and evaluate ML models for forecasting.
-
-## References
-- [WPS User Guide (UCAR)](https://mmg.atm.ucdavis.edu/wp-content/uploads/2014/10/WPS-Duda.pdf)
-- [NOMADS – GFS Data Access](https://nomads.ncep.noaa.gov)
-- [SYNOP API (data.corsica)](https://www.data.corsica/explore/dataset/observation-meteorologique-historiques-france-synop0/information)

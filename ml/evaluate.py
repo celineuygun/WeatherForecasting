@@ -1,8 +1,13 @@
 import os
 import pandas as pd
-from utils import model_abbr
+import argparse
+from utils import MODEL_ABBR
 
-per_station = True  # Set to False for merged data
+# Get per_station from command-line argument
+parser = argparse.ArgumentParser()
+parser.add_argument("--per_station", action="store_true", help="Enable per-station mode")
+args = parser.parse_args()
+per_station = args.per_station
 
 mode = "per_station" if per_station else "merged"
 base_path = os.path.join("results", mode)
@@ -40,7 +45,7 @@ for var in variables:
     stepwise_raw = df_var.groupby(["Step", "Model"])[['MAE', 'RMSE', 'R2 Step']].mean().unstack()
     compact_columns = []
     for metric, model in stepwise_raw.columns:
-        short_model = model_abbr.get(model, model.replace(" ", ""))
+        short_model = MODEL_ABBR.get(model, model.replace(" ", ""))
         short_metric = "R2" if metric == "R2 Step" else metric
         compact_columns.append(f"{short_metric}_{short_model}")
 

@@ -23,7 +23,7 @@ def find_latest_valid_gfs_cycle(current_time: datetime = None) -> tuple[str, dat
     Exits:
         If no valid cycle is found, the script exits with an error message.
     """
-    base_url = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod"
+    BASE_URL = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod"
     current_time = current_time or datetime.now(timezone.utc)
 
     for delta_days in range(0, 2):  # today, yesterday
@@ -34,7 +34,7 @@ def find_latest_valid_gfs_cycle(current_time: datetime = None) -> tuple[str, dat
             if cycle_dt > current_time:
                 continue  # Skip future cycles
             cycle = f"{hour:02d}"
-            url = f"{base_url}/gfs.{ymd}/{cycle}/atmos/gfs.t{cycle}z.pgrb2.0p25.f000"
+            url = f"{BASE_URL}/gfs.{ymd}/{cycle}/atmos/gfs.t{cycle}z.pgrb2.0p25.f000"
             try:
                 resp = requests.head(url, timeout=5)
                 if resp.status_code == 200:
@@ -112,12 +112,12 @@ def download_gfs(path: str, n_worker: int, start_date: datetime, forecast_time: 
 
     logging.info(f"GFS files will be saved in {folder_path}")
 
-    base_url = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod"
+    BASE_URL = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod"
     ymd = start_date.strftime("%Y%m%d")
     forecast_hours = range(0, forecast_time + 1, increment)
 
     urls = [
-        f"{base_url}/gfs.{ymd}/{cycle_time}/atmos/gfs.t{cycle_time}z.pgrb2.0p25.f{hour:03d}"
+        f"{BASE_URL}/gfs.{ymd}/{cycle_time}/atmos/gfs.t{cycle_time}z.pgrb2.0p25.f{hour:03d}"
         for hour in forecast_hours
     ]
     paths = [

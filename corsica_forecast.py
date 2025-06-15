@@ -13,15 +13,15 @@ namelist_wps    = os.path.join(wps_dir, "namelist.wps")
 namelist_wrf    = os.path.join(wrf_dir, "namelist.input")
 
 # Simulation configuration 
-forecast_days           = 1           # Number of forecast days
-gfs_step_hours          = 3           # GFS temporal resolution (every 3 hours)
-gfs_parallel_downloads  = 4           # Number of parallel downloads for GFS
-wrf_procs               = 8           # Number of processors for WRF execution
-wrf_output_domain       = 2           # Domain to save output (d02)
-max_dom                 = 2           # Total number of nested domains
+FORECAST_DAYS           = 1           # Number of forecast days
+GFS_STEP_HOURS          = 3           # GFS temporal resolution (every 3 hours)
+GFS_PARALLEL_DOWNLOADS  = 4           # Number of parallel downloads for GFS
+WRF_PROCS               = 8           # Number of processors for WRF execution
+WRF_OUTPUT_DOMAIN       = 2           # Domain to save output (d02)
+MAX_DOM                 = 2           # Total number of nested domains
 
 # GFS Bounding box for Corsica
-gfs_bbox = {
+GFS_BBOX = {
     "left": 6.0,
     "right": 11.0,
     "top": 44.5,
@@ -35,25 +35,25 @@ start_time = time.time()
 gfs_cycle, start_date = utils.find_latest_valid_gfs_cycle()
 
 # Define end date and forecast window
-end_date = start_date + timedelta(days=forecast_days)
+end_date = start_date + timedelta(days=FORECAST_DAYS)
 print(f"Forecast period: {start_date} to {end_date}")
 
 # Compute forecast duration in hours.
 # Add one extra GFS step to ensure WRF has enough boundary data
-forecast_hours = int((end_date - start_date).total_seconds() / 3600) + gfs_step_hours
+forecast_hours = int((end_date - start_date).total_seconds() / 3600) + GFS_STEP_HOURS
 
 # Download GFS data
 utils.download_gfs(
     gfs_dir,
-    gfs_parallel_downloads,
+    GFS_PARALLEL_DOWNLOADS,
     start_date,
     forecast_hours,
-    gfs_step_hours,
+    GFS_STEP_HOURS,
     gfs_cycle,
-    gfs_bbox["left"],
-    gfs_bbox["right"],
-    gfs_bbox["top"],
-    gfs_bbox["bottom"]
+    GFS_BBOX["left"],
+    GFS_BBOX["right"],
+    GFS_BBOX["top"],
+    GFS_BBOX["bottom"]
 )
 
 # Run WPS preprocessing steps
@@ -61,7 +61,7 @@ utils.run_wps(
     wps_dir,
     gfs_dir,
     namelist_wps,
-    max_dom,
+    MAX_DOM,
     start_date,
     end_date
 )
@@ -72,12 +72,12 @@ utils.run_wrf(
     wrf_dir,
     wrfout_dir,
     namelist_wrf,
-    forecast_days,
-    max_dom,
+    FORECAST_DAYS,
+    MAX_DOM,
     start_date,
     end_date,
-    wrf_procs,
-    wrf_output_domain
+    WRF_PROCS,
+    WRF_OUTPUT_DOMAIN
 )
 
 utils.calculate_execution_time(start_time, time.time())

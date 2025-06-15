@@ -70,7 +70,7 @@ def setup_map(ax):
 
 def plot_t2(nc, lats, lons):
     """
-    Plot 2-meter temperature field from a WRF NetCDF file with Ajaccio and Bastia stations marked and labeled with temperatures and altitude.
+    Plot 2-meter temperature field from a WRF NetCDF file with Ajaccio and Bastia STATIONS marked and labeled with temperatures and altitude.
 
     Parameters:
         nc (Dataset): NetCDF dataset.
@@ -88,7 +88,7 @@ def plot_t2(nc, lats, lons):
     c = ax.contourf(to_np(lons), to_np(lats), to_np(t2), 20, transform=crs.PlateCarree(), cmap="RdBu_r")
     plt.colorbar(c, orientation="horizontal", pad=0.05, label="2m Temperature (°C)")
 
-    stations = {
+    STATIONS = {
         "Ajaccio": {
             "lat": 41.918,
             "lon": 8.792667,
@@ -105,7 +105,7 @@ def plot_t2(nc, lats, lons):
     lon_vals = to_np(lons)
     t2_vals = to_np(t2)
 
-    for name, info in stations.items():
+    for name, info in STATIONS.items():
         lat_s, lon_s, alt = info["lat"], info["lon"], info["alt"]
 
         dist_sq = (lat_vals - lat_s) ** 2 + (lon_vals - lon_s) ** 2
