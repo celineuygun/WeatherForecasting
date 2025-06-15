@@ -4,6 +4,8 @@ WPS/WPS_GEOG/
 
 ml/dataset/
 ml/models
+ml/plots/
+ml/results/
 gfs_dataset/
 wrf_output/
 Vtable

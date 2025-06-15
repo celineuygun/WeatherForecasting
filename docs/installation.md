@@ -88,3 +88,15 @@ geog_data_path = "/path/to/WPS_GEOG"
 cd ..
 ln -sf ungrib/Variable_Tables/Vtable.GFS Vtable
 ```
+
+### SYNOP Observation Data
+
+To train machine learning models, you need historical SYNOP observations from Corsica.
+
+Download the dataset from [data.corsica](https://www.data.corsica/explore/dataset/observation-meteorologique-historiques-france-synop0/api/?sort=date) and save it as:
+
+```
+ml/dataset/synop.csv
+```
+
+This CSV file will be used by the preprocessing step of the ML pipeline. Make sure the file is named exactly as shown.
