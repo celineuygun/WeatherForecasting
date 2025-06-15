@@ -20,6 +20,7 @@ This script:
 ```bash
 python visualize.py
 ```
+Generates forecast maps over Corsica using WRF output. Maps are saved to the plots/ directory.
 
 ## Machine Learning Workflow
 
@@ -29,7 +30,7 @@ The ml/ directory contains all components needed to train, test, and visualize m
 |----------------|-------------|
 | `start.py`     | Interactive CLI menu to launch the entire ML pipeline step-by-step |
 | `train.py`     | Trains regression models (e.g., XGBoost, Random Forest) either per station or globally |
-| `forecast.py`  | Loads trained models and generates multi-horizon forecasts |
+| `forecast.py`  | Generates temperature forecasts using trained models |
 | `evaluate.py`  | Calculates standard error metrics like MAE, RMSE, R², EVS, MAPE |
 | `fusion.py`    | Applies prediction fusion strategies (only in per-station mode) |
 | `visualize.py` | Generates plots (residuals, rolling MAE, scatter, etc.) |
@@ -72,8 +73,8 @@ Each step can be executed independently with (per-station mode) or without (merg
 
 ```bash
 # Training
-python train.py --per_station
-python train.py
+python train.py --per_station   # per-station mode
+python train.py                 # merged mode
 
 # Forecasting
 python forecast.py --per_station
@@ -91,16 +92,17 @@ python visualize.py --per_station
 python visualize.py
 ```
 
-### Output Paths
-In per-station mode, output files are saved in: results/per_station/
-In merged mode, output files are saved in: results/merged/
+### ML Outputs
+After running the pipeline, several output directories and files are generated to store models, metrics, forecasts, visualizations, and evaluation results.
 
-Each output directory contains:
-* metrics.csv: Summary of evaluation metrics
-* predictions_*.csv: Forecast results for each variable
-* plots/: Visual diagnostics and error charts
-* models/: Trained model files (joblib .pkl)
-* fusion/: Results of different fusion strategies (per-station only)
+| Folder              | Description                                                                 |
+|---------------------|-----------------------------------------------------------------------------|
+| `ml/results/`           | Stores prediction CSVs, evaluation metrics, fusion results, and plots.     |
+| `ml/results/per_station/` | Output for per-station mode. Contains one CSV per variable.              |
+| `ml/results/merged/`    | Output for merged mode.                                                    |
+| `ml/models/`            | Contains trained ML models in `.pkl` format        |
+| `ml/plots/`             | Contains static maps showing forecasts on Corsica for each model and step. |
+
 
 
 ## References
