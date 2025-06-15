@@ -44,11 +44,23 @@ sudo apt update && sudo apt install -y \
 
 Install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) if not already installed.
 
-### Create Environment
+### Create WRF Environment
+For compiling and running the WRF and WPS models, use the environment.yml located at the root of the repository:
+
 ```bash
 conda env create -f environment.yml
 conda activate wrf_project
 ```
+
+### Create ML Environment
+For training and evaluating machine learning models, use the separate environment.yml inside the ml/ directory:
+
+```bash
+cd ml
+conda env create -f environment.yml
+conda activate ml_forecasting
+```
+You may need to activate each environment separately depending on whether you're working with WRF or ML components.
 
 ## WRF and WPS Installation
 
